@@ -1,0 +1,417 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// User model for authentication
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile Profile?
+}
+
+// Enum for user roles
+enum Role {
+  student
+  faculty
+  super_admin
+}
+
+// Enum for departments
+enum Department {
+  IT
+  CS
+  ECS
+  ETC
+  BM
+}
+
+// Profile model with role-specific fields
+model Profile {
+  id         String     @id @default(uuid())
+  userId     String     @unique
+  name       String
+  email      String
+  role       Role
+  department Department
+  rollNumber String? // For students only
+  semester   Int? // For students only
+  domains    String? // Comma-separated domain tags for faculty, e.g. "AI, Web Dev, CyberSec"
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Relations
+  createdGroups           Group[]                @relation("GroupCreator")
+  groupMemberships        GroupMember[]
+  createdMentorForms      MentorAllocationForm[]
+  submittedPreferences    MentorPreference[]
+  mentorAllocations       MentorAllocation[]     @relation("MentorAllocations")
+  availableInForms        AvailableMentor[]
+  uploadedAttachments     Attachment[]
+  topicApprovalDocuments  TopicApprovalDocument[] @relation("TopicApprovalUploader")
+  filledEvaluations       ReviewEvaluation[]      @relation("EvaluationFiller")
+  studentGrades           StudentGrade[]          @relation("StudentGrades")
+}
+
+// Group/Team model
+model Group {
+  id         String     @id @default(uuid())
+  groupId    String     @unique // e.g., IT03
+  teamCode   String     @unique // e.g., A7DXQ
+  department Department
+  createdBy  String
+  isFull     Boolean    @default(false)
+  meetLink   String? // Pinned Google Meet link for topic discussion
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  creator              Profile                @relation("GroupCreator", fields: [createdBy], references: [id])
+  members              GroupMember[]
+  preferences          MentorPreference[]
+  allocations          MentorAllocation[]
+  topics               ProjectTopic[]
+  attachments          Attachment[]
+  topicApprovalDoc     TopicApprovalDocument?
+  reviewEvaluations    ReviewEvaluation[]
+}
+
+// Group membership (many-to-many between Profile and Group)
+model GroupMember {
+  id        String   @id @default(uuid())
+  groupId   String
+  profileId String
+  joinedAt  DateTime @default(now())
+
+  group   Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, profileId])
+  @@index([profileId])
+  @@index([groupId])
+}
+
+// Mentor Allocation Form (created by Super Admin)
+model MentorAllocationForm {
+  id         String     @id @default(uuid())
+  department Department
+  isActive   Boolean    @default(true)
+  createdBy  String
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  creator          Profile            @relation(fields: [createdBy], references: [id])
+  availableMentors AvailableMentor[]
+  preferences      MentorPreference[]
+  allocations      MentorAllocation[]
+}
+
+// Available mentors for a form (many-to-many)
+model AvailableMentor {
+  id       String @id @default(uuid())
+  formId   String
+  mentorId String
+
+  form   MentorAllocationForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  mentor Profile              @relation(fields: [mentorId], references: [id], onDelete: Cascade)
+
+  @@unique([formId, mentorId])
+}
+
+// Mentor preferences submitted by group leader
+model MentorPreference {
+  id            String   @id @default(uuid())
+  groupId       String
+  formId        String
+  mentorChoice1 String // 1st preference mentor id
+  mentorChoice2 String // 2nd preference mentor id
+  mentorChoice3 String // 3rd preference mentor id
+  submittedBy   String
+  submittedAt   DateTime @default(now())
+
+  group     Group                @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  form      MentorAllocationForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  submitter Profile              @relation(fields: [submittedBy], references: [id])
+
+  @@unique([groupId, formId])
+  @@index([groupId])
+  @@index([formId])
+}
+
+// Mentor allocation status
+model MentorAllocation {
+  id             String           @id @default(uuid())
+  groupId        String
+  mentorId       String
+  formId         String
+  status         AllocationStatus @default(pending)
+  preferenceRank Int // 1, 2, or 3
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  group  Group                @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  mentor Profile              @relation("MentorAllocations", fields: [mentorId], references: [id])
+  form   MentorAllocationForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, mentorId, formId])
+  @@index([groupId])
+  @@index([mentorId])
+  @@index([formId])
+}
+
+enum AllocationStatus {
+  pending
+  accepted
+  rejected
+  waiting
+}
+
+// Counter for group serial numbers per department
+model GroupCounter {
+  id         String     @id @default(uuid())
+  department Department @unique
+  counter    Int        @default(0)
+}
+
+// ============================================
+// Project Topic Approval Models
+// ============================================
+
+enum TopicStatus {
+  submitted
+  under_review
+  approved
+  rejected
+  revision_requested
+}
+
+model ProjectTopic {
+  id          String      @id @default(uuid())
+  groupId     String
+  title       String
+  description String      @db.Text
+  status      TopicStatus @default(submitted)
+  submittedBy String
+  submittedAt DateTime    @default(now())
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  group    Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  messages TopicMessage[]
+  @@index([groupId])
+}
+
+model TopicMessage {
+  id         String   @id @default(uuid())
+  topicId    String? // null for general discussion, or actual topic ID
+  groupId    String
+  authorId   String
+  authorName String
+  authorRole String // "student" or "faculty"
+  content    String   @db.Text
+  links      String[] // Array of URLs
+  createdAt  DateTime @default(now())
+
+  // Optional relation - topicId can be null for general group discussion
+  topic ProjectTopic? @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@index([topicId])
+  @@index([groupId])
+}
+
+// ============================================
+// Review System Models
+// ============================================
+
+enum ReviewType {
+  review_1
+  review_2
+  final_review
+}
+
+enum ReviewStatus {
+  not_started
+  in_progress
+  submitted
+  feedback_given
+  completed
+}
+
+model ReviewRollout {
+  id         String     @id @default(uuid())
+  department Department
+  reviewType ReviewType
+  isActive   Boolean    @default(true)
+  createdBy  String
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  @@unique([department, reviewType])
+}
+
+model ReviewSession {
+  id                  String       @id @default(uuid())
+  groupId             String
+  reviewType          ReviewType
+  status              ReviewStatus @default(not_started)
+  progressPercentage  Int          @default(0) // 0-100
+  progressDescription String       @db.Text
+  submittedBy         String
+  submittedAt         DateTime     @default(now())
+  mentorFeedback      String?      @db.Text
+  feedbackGivenBy     String?
+  feedbackGivenAt     DateTime?
+  meetLink            String? // Pinned Google Meet link for this review
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  messages   ReviewMessage[]
+  evaluation ReviewEvaluation?
+
+  @@unique([groupId, reviewType])
+  @@index([groupId])
+}
+
+model ReviewMessage {
+  id         String   @id @default(uuid())
+  sessionId  String
+  groupId    String
+  authorId   String
+  authorName String
+  authorRole String // "student" or "faculty"
+  content    String   @db.Text
+  links      String[] // Array of URLs
+  createdAt  DateTime @default(now())
+
+  session ReviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// Attachment Models (Supabase Storage)
+// ============================================
+
+enum AttachmentStage {
+  topic_approval
+  review_1
+  review_2
+  final_review
+}
+
+model Attachment {
+  id          String          @id @default(uuid())
+  groupId     String
+  stage       AttachmentStage? // Made optional for backwards compatibility
+  filename    String
+  fileUrl     String
+  fileSize    Int             // Size in bytes
+  mimeType    String
+  uploadedBy  String          // Profile ID of uploader
+  uploadedAt  DateTime        @default(now())
+  
+  group       Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  uploader    Profile         @relation(fields: [uploadedBy], references: [id])
+  
+  @@index([groupId])
+}
+
+// ============================================
+// Topic Approval Document (Signed Form Upload)
+// ============================================
+
+model TopicApprovalDocument {
+  id          String   @id @default(uuid())
+  groupId     String   @unique
+  filename    String
+  fileUrl     String
+  fileSize    Int      // Size in bytes
+  mimeType    String
+  uploadedBy  String   // Profile ID (group leader)
+  uploadedAt  DateTime @default(now())
+  
+  group       Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  uploader    Profile  @relation("TopicApprovalUploader", fields: [uploadedBy], references: [id])
+}
+
+// ============================================
+// Review Evaluation Forms (Faculty Grading)
+// ============================================
+
+model ReviewEvaluation {
+  id                   String     @id @default(uuid())
+  sessionId            String     @unique
+  groupId              String
+  reviewType           ReviewType
+  
+  // Header fields
+  evaluationDate       DateTime
+  division             String     // A or B
+  projectGuide         String     // Pre-filled from mentor name
+  projectTitle         String     // Pre-filled from approved topic
+  
+  // Review 1 specific fields
+  projectCategory      String?    // A/B/C (Very Good/Good/Satisfactory)
+  projectType          String?    // Research/Application/Product/Industry/Social
+  
+  // Review 2 specific fields
+  projectDomain        String?    // AI ML, NLP, Web, Security, Big Data, etc.
+  qualityGrade         String?    // A/B/C
+  projectNature        String?    // Research/Application/Product/Social
+  
+  // Common fields
+  completionPercentage Int        // 0-100
+  remarks              String?    @db.Text
+  
+  // Audit fields
+  filledBy             String     // Mentor profile id
+  filledAt             DateTime   @default(now())
+  
+  session              ReviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  group                Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  mentor               Profile       @relation("EvaluationFiller", fields: [filledBy], references: [id])
+  studentGrades        StudentGrade[]
+  
+  @@index([groupId])
+  @@index([reviewType])
+}
+
+model StudentGrade {
+  id              String   @id @default(uuid())
+  evaluationId    String
+  profileId       String
+  studentName     String
+  rollNumber      String
+  
+  // Review 1 grading (max 25 total)
+  progressMarks       Int?     // 0-10: Progress of project implementation
+  contributionMarks   Int?     // 0-10: Individual contribution in project
+  publicationMarks    Int?     // 0-5: Paper Publication Status
+  
+  // Review 2 grading (max 25 total)
+  techUsageMarks      Int?     // 0-5: Usage of tech, Cost effective & Social impact
+  innovationMarks     Int?     // 0-5: Innovativeness & Feasibility
+  presentationMarks   Int?     // 0-5: Overall Presentation & Perf.
+  activityMarks       Int?     // 0-5: Project Activity (SIH/Paper)
+  synopsisMarks       Int?     // 0-5: Project Synopsis
+  
+  totalMarks          Int      // Calculated total
+  
+  evaluation      ReviewEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  student         Profile          @relation("StudentGrades", fields: [profileId], references: [id])
+  
+  @@index([evaluationId])
+}
