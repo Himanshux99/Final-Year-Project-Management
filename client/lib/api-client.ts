@@ -98,6 +98,29 @@ async function apiUpload<T>(
   return JSON.parse(text);
 }
 
+async function apiUploadWithFields<T>(
+  endpoint: string,
+  file: File,
+  fields: Record<string, any>,
+  method: "POST" | "PATCH" = "POST",
+): Promise<T> {
+  const token = getToken();
+  const formData = new FormData();  
+  formData.append("file", file);
+  Object.entries(fields).forEach(([key, value]) => formData.append(key, value));
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  method,
+  headers: token ? { Authorization: `Bearer ${token}` } : {},
+  body: formData,
+});
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: response.statusText }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+  const text = await response.text();
+  return text ? JSON.parse(text) : (null as T);
+}
+
 export const api = {
   // GET request
   get: <T>(endpoint: string): Promise<T> => {
@@ -128,5 +151,13 @@ export const api = {
   // File upload
   upload: <T>(endpoint: string, file: File): Promise<T> => {
     return apiUpload<T>(endpoint, file);
+  },
+  uploadWithFields: <T>(
+  endpoint: string,
+  file: File,
+  fields: Record<string, any>,
+  method: "POST" | "PATCH" = "POST",
+): Promise<T> => {
+    return apiUploadWithFields<T>(endpoint, file, fields);
   },
 };

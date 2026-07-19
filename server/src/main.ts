@@ -18,6 +18,7 @@ async function bootstrap() {
     ...configuredOrigins,
   ]);
 
+  console.log('Allowed CORS origins:', Array.from(allowedOrigins))
   // Enable CORS for frontend
   app.enableCors({
     origin: (origin, callback) => {

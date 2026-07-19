@@ -22,6 +22,7 @@ import type {
   ReviewType,
   ReviewEvaluation,
 } from "@/types";
+import { DeleteTeamButton } from '@/components/delete-team-button';
 
 export default function FacultyTeamPage() {
   const router = useRouter();
@@ -134,9 +135,9 @@ export default function FacultyTeamPage() {
     loadTeamData();
   }, [authLoading, user, profile, router, loadTeamData]);
 
-  const handleSubmitTopic = async (title: string, description: string) => {
+  const handleSubmitTopic = async (title: string, description: string, file?: File) => {
     try {
-      await projectTopicsApi.create({ title, description });
+      await projectTopicsApi.create({ title, description }, file);
       showToast("Topic submitted!", "success");
       await loadTeamData();
     } catch (error: any) {
@@ -164,6 +165,7 @@ export default function FacultyTeamPage() {
     }
   };
 
+  const handleEditTopic = async (topicId: string, title: string, description: string, file?: File) => { return;}
   const handleRequestRevision = async (topicId: string, feedback: string) => {
     try {
       await projectTopicsApi.requestRevision(topicId, feedback);
@@ -401,6 +403,7 @@ export default function FacultyTeamPage() {
               groupId={group.id}
               isLeader={false}
               onSubmitTopic={handleSubmitTopic}
+              onUpdateTopic={handleEditTopic}
               onApproveTopic={handleApproveTopic}
               onRejectTopic={handleRejectTopic}
               onRequestRevision={handleRequestRevision}

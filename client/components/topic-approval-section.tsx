@@ -10,6 +10,8 @@ import {
   ChevronDown,
   ChevronUp,
   AlertCircle,
+  FileText,
+  Download,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
@@ -35,7 +37,13 @@ interface TopicApprovalSectionProps {
   currentUserRole: "student" | "faculty";
   groupId: string;
   isLeader?: boolean;
-  onSubmitTopic: (title: string, description: string) => void;
+  onSubmitTopic: (title: string, description: string, file?: File) => void;
+  onUpdateTopic: (
+    topicId: string,
+    title: string,
+    description: string,
+    file?: File,
+  ) => void;
   onApproveTopic: (topicId: string) => void;
   onRejectTopic: (topicId: string) => void;
   onRequestRevision: (topicId: string, feedback: string) => void;
@@ -94,6 +102,7 @@ export function TopicApprovalSection({
   groupId,
   isLeader = false,
   onSubmitTopic,
+  onUpdateTopic,
   onApproveTopic,
   onRejectTopic,
   onRequestRevision,
@@ -105,12 +114,16 @@ export function TopicApprovalSection({
   const [showAddTopic, setShowAddTopic] = React.useState(false);
   const [newTopicTitle, setNewTopicTitle] = React.useState("");
   const [newTopicDescription, setNewTopicDescription] = React.useState("");
+  const [newTopicFile, setNewTopicFile] = React.useState<File | null>(null);
   const [expandedTopic, setExpandedTopic] = React.useState<string | null>(null);
   const [showRevisionDialog, setShowRevisionDialog] = React.useState(false);
   const [selectedTopicForRevision, setSelectedTopicForRevision] =
     React.useState<string | null>(null);
   const [revisionFeedback, setRevisionFeedback] = React.useState("");
   const [showChat, setShowChat] = React.useState(true);
+  const [editingTopic, setEditingTopic] = React.useState<ProjectTopic | null>(
+    null,
+  );
 
   const approvedTopic = topics.find((t) => t.status === "approved");
   const pendingTopics = topics.filter(
@@ -134,16 +147,58 @@ export function TopicApprovalSection({
 
   const handleSubmitTopic = () => {
     if (newTopicTitle.trim() && newTopicDescription.trim()) {
-      onSubmitTopic(newTopicTitle.trim(), newTopicDescription.trim());
+      if (editingTopic) {
+        console.log("Updating topic:", editingTopic.title, newTopicDescription, newTopicFile);
+        onUpdateTopic(
+          editingTopic.id,
+          newTopicTitle.trim(),
+          newTopicDescription.trim(),
+          newTopicFile || undefined,
+        );
+      } else {
+        onSubmitTopic(
+          newTopicTitle.trim(),
+          newTopicDescription.trim(),
+          newTopicFile || undefined,
+        );
+      }
+
+      setEditingTopic(null);
       setNewTopicTitle("");
       setNewTopicDescription("");
+      setNewTopicFile(null);
       setShowAddTopic(false);
     }
   };
 
+  const handleEditTopic = (topic: ProjectTopic) => {
+    setEditingTopic(topic);
+
+    setNewTopicTitle(topic.title);
+    setNewTopicDescription(topic.description);
+    setNewTopicFile(null);
+
+    setShowAddTopic(true);
+  };
+
   const handleRequestRevision = () => {
     if (selectedTopicForRevision && revisionFeedback.trim()) {
-      onRequestRevision(selectedTopicForRevision, revisionFeedback.trim());
+      const topic = topics.find((t) => t.id === selectedTopicForRevision);
+
+      if (!topic) return;
+
+      // Sort by submission time (oldest -> newest)
+      const sortedTopics = [...topics].sort(
+        (a, b) =>
+          new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime(),
+      );
+
+      const topicNumber = sortedTopics.findIndex((t) => t.id === topic.id) + 1;
+
+      const formattedFeedback = `Topic #${topicNumber}: ${topic.title}\n\n${revisionFeedback.trim()}`;
+
+      onRequestRevision(topic.id, formattedFeedback);
+
       setShowRevisionDialog(false);
       setSelectedTopicForRevision(null);
       setRevisionFeedback("");
@@ -215,114 +270,150 @@ export function TopicApprovalSection({
             </div>
           ) : (
             <div className="space-y-3">
-              {topics.map((topic, index) => {
-                const statusConfig = getStatusConfig(topic.status);
-                const StatusIcon = statusConfig.icon;
-                const isExpanded = expandedTopic === topic.id;
+              {[...topics]
+                .sort(
+                  (a, b) =>
+                    new Date(a.submittedAt).getTime() -
+                    new Date(b.submittedAt).getTime(),
+                )
+                .reverse()
+                .map((topic, _, sortedTopics) => {
+                  const topicNumber =
+                    sortedTopics.length -
+                    sortedTopics.findIndex((t) => t.id === topic.id);
 
-                return (
-                  <div
-                    key={topic.id}
-                    className={`border rounded-lg overflow-hidden ${
-                      topic.status === "approved"
-                        ? "border-green-300 bg-green-50/50"
-                        : topic.status === "rejected"
-                          ? "border-red-200 bg-red-50/30"
-                          : "border-gray-200"
-                    }`}
-                  >
-                    {/* Topic Header */}
+                  const statusConfig = getStatusConfig(topic.status);
+                  const StatusIcon = statusConfig.icon;
+                  const isExpanded = expandedTopic === topic.id;
+
+                  return (
                     <div
-                      className="flex items-start justify-between p-3 cursor-pointer hover:bg-gray-50/50"
-                      onClick={() =>
-                        setExpandedTopic(isExpanded ? null : topic.id)
-                      }
+                      key={topic.id}
+                      className={`border rounded-lg overflow-hidden ${
+                        topic.status === "approved"
+                          ? "border-green-300 bg-green-50/50"
+                          : topic.status === "rejected"
+                            ? "border-red-200 bg-red-50/30"
+                            : "border-gray-200"
+                      }`}
                     >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-gray-500">
-                            #{index + 1}
-                          </span>
-                          <h4 className="font-medium text-gray-900 truncate">
-                            {topic.title}
-                          </h4>
+                      {/* Topic Header */}
+                      <div
+                        className="flex items-start justify-between p-3 cursor-pointer hover:bg-gray-50/50"
+                        onClick={() =>
+                          setExpandedTopic(isExpanded ? null : topic.id)
+                        }
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-500">
+                              #{topicNumber}
+                            </span>
+                            <h4 className="font-medium text-gray-900 truncate">
+                              {topic.title}
+                            </h4>
+                          </div>
+                          {!isExpanded && (
+                            <p className="text-sm text-gray-600 truncate mt-1">
+                              {topic.description}
+                            </p>
+                          )}
                         </div>
-                        {!isExpanded && (
-                          <p className="text-sm text-gray-600 truncate mt-1">
+                        <div className="flex items-center gap-2 ml-2">
+                          <Badge variant={statusConfig.variant}>
+                            <StatusIcon className="h-3 w-3 mr-1" />
+                            {statusConfig.label}
+                          </Badge>
+                          {isExpanded ? (
+                            <ChevronUp className="h-4 w-4 text-gray-400" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4 text-gray-400" />
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditTopic(topic);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                      </div>
+
+                      {/* Expanded Content */}
+                      {isExpanded && (
+                        <div className="px-3 pb-3 border-t border-gray-100">
+                          <p className="text-sm text-gray-700 mt-3 whitespace-pre-wrap">
                             {topic.description}
                           </p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 ml-2">
-                        <Badge variant={statusConfig.variant}>
-                          <StatusIcon className="h-3 w-3 mr-1" />
-                          {statusConfig.label}
-                        </Badge>
-                        {isExpanded ? (
-                          <ChevronUp className="h-4 w-4 text-gray-400" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4 text-gray-400" />
-                        )}
-                      </div>
-                    </div>
 
-                    {/* Expanded Content */}
-                    {isExpanded && (
-                      <div className="px-3 pb-3 border-t border-gray-100">
-                        <p className="text-sm text-gray-700 mt-3 whitespace-pre-wrap">
-                          {topic.description}
-                        </p>
+                          <div className="text-xs text-gray-400 mt-2">
+                            Submitted on{" "}
+                            {new Date(topic.submittedAt).toLocaleDateString()}
+                          </div>
 
-                        <div className="text-xs text-gray-400 mt-2">
-                          Submitted on{" "}
-                          {new Date(topic.submittedAt).toLocaleDateString()}
-                        </div>
-
-                        {/* Faculty Actions */}
-                        {currentUserRole === "faculty" &&
-                          !approvedTopic &&
-                          topic.status !== "rejected" && (
-                            <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100">
-                              <Button
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onApproveTopic(topic.id);
-                                }}
-                                className="gap-1"
-                              >
-                                <CheckCircle className="h-4 w-4" />
-                                Approve
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedTopicForRevision(topic.id);
-                                  setShowRevisionDialog(true);
-                                }}
-                              >
-                                Request Revision
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onRejectTopic(topic.id);
-                                }}
-                              >
-                                <XCircle className="h-4 w-4" />
-                                Reject
-                              </Button>
-                            </div>
+                          {topic.document && (
+                            <a
+                              href={topic.document.fileUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              download={topic.document.filename}
+                              onClick={(e) => e.stopPropagation()}
+                              className="mt-3 inline-flex items-center gap-2 text-sm text-primary hover:underline"
+                            >
+                              <FileText className="h-4 w-4" />
+                              <span>{topic.document.filename}</span>
+                              <Download className="h-4 w-4" />
+                            </a>
                           )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+
+                          {/* Faculty Actions */}
+                          {currentUserRole === "faculty" &&
+                            !approvedTopic &&
+                            topic.status !== "rejected" && (
+                              <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100">
+                                <Button
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onApproveTopic(topic.id);
+                                  }}
+                                  className="gap-1"
+                                >
+                                  <CheckCircle className="h-4 w-4" />
+                                  Approve
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedTopicForRevision(topic.id);
+                                    setShowRevisionDialog(true);
+                                  }}
+                                >
+                                  Request Revision
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onRejectTopic(topic.id);
+                                  }}
+                                >
+                                  <XCircle className="h-4 w-4" />
+                                  Reject
+                                </Button>
+                              </div>
+                            )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
             </div>
           )}
         </CardContent>
@@ -376,7 +467,9 @@ export function TopicApprovalSection({
       <Dialog open={showAddTopic} onOpenChange={setShowAddTopic}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Submit New Topic</DialogTitle>
+            <DialogTitle>
+              {editingTopic ? "Update Topic" : "Submit Topic"}
+            </DialogTitle>
             <DialogDescription>
               Provide a clear title and detailed description for your project
               topic.
@@ -393,6 +486,21 @@ export function TopicApprovalSection({
                 placeholder="e.g., AI-Powered Student Attendance System"
                 className="mt-1"
               />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-700">
+                Supporting document{" "}
+                <span className="text-gray-500">(optional)</span>
+              </label>
+              <Input
+                type="file"
+                accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={(e) => setNewTopicFile(e.target.files?.[0] || null)}
+                className="mt-1"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                One PDF, DOC, or DOCX file, up to 10 MB.
+              </p>
             </div>
             <div>
               <label className="text-sm font-medium text-gray-700">
@@ -414,7 +522,7 @@ export function TopicApprovalSection({
               onClick={handleSubmitTopic}
               disabled={!newTopicTitle.trim() || !newTopicDescription.trim()}
             >
-              Submit Topic
+              {editingTopic ? "Update Topic" : "Submit Topic"}
             </Button>
           </DialogFooter>
         </DialogContent>

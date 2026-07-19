@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Param, UseGuards, Request } from '@nestjs/common';
+import { Controller, Post, Get, Param, UseGuards, Request, Delete } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
 import { MentorAllocationsService } from './mentor-allocations.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -47,5 +47,15 @@ export class MentorAllocationsController {
   @Post(':id/reject')
   async reject(@Request() req: ExpressRequest, @Param('id') id: string) {
     return this.mentorAllocationsService.rejectAllocation(req.user.userId, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('groups/:groupId')
+  removeTeam(
+    @Param('groupId') groupId: string,
+    @Request() req: ExpressRequest,
+  ) {
+    console.log(`Removing team with groupId: ${groupId} for userId: ${req.user.userId}`);
+    return this.mentorAllocationsService.removeTeam(groupId);
   }
 }

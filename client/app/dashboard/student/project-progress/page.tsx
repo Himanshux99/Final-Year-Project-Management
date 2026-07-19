@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard-layout";
@@ -39,7 +39,6 @@ export default function ProjectProgressPage() {
 
   const [group, setGroup] = useState<Group | null>(null);
   const [mentor, setMentor] = useState<Profile | null>(null);
-  const [activeTab, setActiveTab] = useState("topic");
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Topic Approval State
@@ -51,18 +50,13 @@ export default function ProjectProgressPage() {
   const [review2RolledOut, setReview2RolledOut] = useState(false);
   const [finalReviewRolledOut, setFinalReviewRolledOut] = useState(false);
 
-  const [review1Session, setReview1Session] =
-    useState<ReviewSessionType | null>(null);
-  const [review2Session, setReview2Session] =
-    useState<ReviewSessionType | null>(null);
-  const [finalReviewSession, setFinalReviewSession] =
-    useState<ReviewSessionType | null>(null);
+  const [review1Session, setReview1Session] = useState<ReviewSessionType | null>(null);
+  const [review2Session, setReview2Session] = useState<ReviewSessionType | null>(null);
+  const [finalReviewSession, setFinalReviewSession] = useState<ReviewSessionType | null>(null);
 
   const [review1Messages, setReview1Messages] = useState<ReviewMessage[]>([]);
   const [review2Messages, setReview2Messages] = useState<ReviewMessage[]>([]);
-  const [finalReviewMessages, setFinalReviewMessages] = useState<
-    ReviewMessage[]
-  >([]);
+  const [finalReviewMessages, setFinalReviewMessages] = useState<ReviewMessage[]>([]);
 
   // Attachments State
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -70,6 +64,31 @@ export default function ProjectProgressPage() {
 
   // Topic Approval Document State
   const [topicApprovalDoc, setTopicApprovalDoc] = useState<TopicApprovalDocument | null>(null);
+
+  const isLeader = group && profile && group.createdBy === profile.id;
+  const hasApprovedTopic = topics.some((t) => t.status === "approved");
+  const hasTopicApprovalDoc = !!topicApprovalDoc;
+  console.log("members", group?.members);
+  // Reviews require both approved topic AND uploaded topic approval form
+  const canAccessReviews = hasApprovedTopic && hasTopicApprovalDoc;
+  
+  
+  const defaultTab = useMemo(() => {
+    if (!canAccessReviews) return "topic";
+    if (review1Session?.status !== "completed") return "review1";
+    if (review2Session?.status !== "completed") return "review2";
+    if (finalReviewSession?.status !== "completed") return "final";
+
+    return "final";
+  }, [    
+    canAccessReviews,
+    review1Session?.status,
+    review2Session?.status,
+    finalReviewSession?.status,
+  ]);
+
+  const [activeTab, setActiveTab] = useState(defaultTab);
+
 
   const loadData = useCallback(async () => {
     if (!profile) return;
@@ -177,14 +196,7 @@ export default function ProjectProgressPage() {
     setRefreshKey((k) => k + 1);
     showToast("Data refreshed", "info");
   };
-
-  const isLeader = group && profile && group.createdBy === profile.id;
-  const hasApprovedTopic = topics.some((t) => t.status === "approved");
-  const hasTopicApprovalDoc = !!topicApprovalDoc;
   
-  // Reviews require both approved topic AND uploaded topic approval form
-  const canAccessReviews = hasApprovedTopic && hasTopicApprovalDoc;
-
   // Topic approval document handlers
   const handleTopicApprovalDocChange = async () => {
     try {
@@ -195,6 +207,8 @@ export default function ProjectProgressPage() {
       showToast(error.message || "Failed to update document", "error");
     }
   };
+
+  console.log("group", group);
 
   // Attachment Handlers
   const handleUploadAttachment = async (file: File) => {
@@ -224,14 +238,26 @@ export default function ProjectProgressPage() {
   };
 
   // Topic Approval Handlers
-  const handleSubmitTopic = async (title: string, description: string) => {
+  const handleSubmitTopic = async (title: string, description: string, file?: File) => {
     if (!group || !profile) return;
     try {
-      await projectTopicsApi.create({ title, description });
+      await projectTopicsApi.create({ title, description }, file);
       showToast("Topic submitted successfully!", "success");
       await loadData();
     } catch (error: any) {
       showToast(error.message || "Failed to submit topic", "error");
+    }
+  };
+
+  const handleEditTopic = async (topicId: string, title: string, description: string, file?: File) => {
+    if (!group || !profile) return;
+    try {
+      await projectTopicsApi.update(topicId, { title, description }, file);
+      await loadData();
+      showToast("Topic updated successfully!", "success");
+    } catch (error: any) {
+      showToast(error.message || "Failed to update topic", "error");
+    }finally{
     }
   };
 
@@ -396,7 +422,7 @@ export default function ProjectProgressPage() {
     }
   };
 
-  if (!group || !mentor || !profile) {
+  if (!group || !mentor || !profile ) {
     return (
       <DashboardLayout title="Project Progress">
         <div className="max-w-4xl mx-auto">
@@ -446,7 +472,7 @@ export default function ProjectProgressPage() {
         </div>
 
         {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs defaultValue={defaultTab} value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="w-full grid grid-cols-5">
             <TabsTrigger value="topic">Topic</TabsTrigger>
             <TabsTrigger value="review1" disabled={!canAccessReviews}>
@@ -492,6 +518,7 @@ export default function ProjectProgressPage() {
               groupId={group.id}
               isLeader={isLeader ?? false}
               onSubmitTopic={handleSubmitTopic}
+              onUpdateTopic={handleEditTopic}
               onApproveTopic={handleApproveTopic}
               onRejectTopic={handleRejectTopic}
               onRequestRevision={handleRequestRevision}
@@ -504,11 +531,13 @@ export default function ProjectProgressPage() {
           {/* Review 1 */}
           <TabsContent value="review1">
             <ReviewSection
+
               reviewType="review_1"
               session={review1Session}
               messages={review1Messages}
               currentUserId={profile.id}
               currentUserName={profile.name}
+              group={group}
               currentUserRole="student"
               isRolledOut={review1RolledOut}
               isUnlocked={canAccessReviews}
@@ -537,6 +566,7 @@ export default function ProjectProgressPage() {
               reviewType="review_2"
               session={review2Session}
               messages={review2Messages}
+              group={group}
               currentUserId={profile.id}
               currentUserName={profile.name}
               currentUserRole="student"
@@ -569,6 +599,7 @@ export default function ProjectProgressPage() {
               messages={finalReviewMessages}
               currentUserId={profile.id}
               currentUserName={profile.name}
+              group={group}
               currentUserRole="student"
               isRolledOut={finalReviewRolledOut}
               isUnlocked={canAccessReviews && review2Session?.status === "completed"}

@@ -2,9 +2,11 @@ import { Injectable, BadRequestException, NotFoundException, ForbiddenException 
 import { PrismaService } from '../prisma/prisma.service';
 import { ProfilesService } from '../profiles/profiles.service';
 import { GroupsService } from '../groups/groups.service';
+import { SupabaseService } from '../supabase/supabase.service';
 import { CreateTopicDto } from './dto/create-topic.dto';
 import { ReviewTopicDto } from './dto/review-topic.dto';
 import { AddTopicMessageDto } from './dto/add-message.dto';
+import { UpdateTopicDto } from './dto/update-topic.dto';
 
 @Injectable()
 export class ProjectTopicsService {
@@ -12,9 +14,10 @@ export class ProjectTopicsService {
     private prisma: PrismaService,
     private profilesService: ProfilesService,
     private groupsService: GroupsService,
+    private supabaseService: SupabaseService,
   ) {}
 
-  async createTopic(userId: string, createTopicDto: CreateTopicDto) {
+  async createTopic(userId: string, createTopicDto: CreateTopicDto, file?: Express.Multer.File) {
     const profile = await this.profilesService.findByUserId(userId);
     if (!profile) {
       throw new BadRequestException('Profile not found');
@@ -41,14 +44,52 @@ export class ProjectTopicsService {
       throw new BadRequestException('Your group already has an approved topic');
     }
 
-    return this.prisma.projectTopic.create({
+    let storagePath: string | undefined;
+    let fileUrl: string | undefined;
+    if (file) {
+      const allowedMimeTypes = [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      ];
+      if (!allowedMimeTypes.includes(file.mimetype)) {
+        throw new BadRequestException('Invalid document type. Allowed: PDF, DOC, DOCX');
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        throw new BadRequestException('Document size exceeds the 10 MB limit');
+      }
+
+      const extension = file.originalname.split('.').pop() || 'file';
+      storagePath = `${group.id}/topic-submissions/${Date.now()}-${crypto.randomUUID()}.${extension}`;
+      fileUrl = await this.supabaseService.uploadFile(storagePath, file.buffer, file.mimetype);
+    }
+
+    try {
+      return await this.prisma.projectTopic.create({
       data: {
         groupId: group.id,
         title: createTopicDto.title,
         description: createTopicDto.description,
         submittedBy: profile.id,
+        ...(file && fileUrl ? {
+          document: {
+            create: {
+              filename: file.originalname,
+              fileUrl,
+              fileSize: file.size,
+              mimeType: file.mimetype,
+            },
+          },
+        } : {}),
       },
+      include: { document: true },
     });
+    } catch (error) {
+      if (storagePath) {
+        await this.supabaseService.deleteFile(storagePath).catch((): void => {});
+      }
+      throw error;
+    }
   }
 
   async getTopicsByGroup(userId: string) {
@@ -65,6 +106,7 @@ export class ProjectTopicsService {
     return this.prisma.projectTopic.findMany({
       where: { groupId: group.id },
       orderBy: { submittedAt: 'desc' },
+      include: { document: true },
     });
   }
 
@@ -86,6 +128,7 @@ export class ProjectTopicsService {
     return this.prisma.projectTopic.findMany({
       where: { groupId },
       orderBy: { submittedAt: 'desc' },
+      include: { document: true },
     });
   }
 
@@ -273,6 +316,95 @@ export class ProjectTopicsService {
     return this.prisma.topicMessage.findMany({
       where: { groupId },
       orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async updateTopic(
+  userId: string,
+  topicId: string,
+  updateTopicDto: UpdateTopicDto,
+  file?: Express.Multer.File,
+) {
+    const profile = await this.profilesService.findByUserId(userId);
+
+    if (!profile) {
+      throw new BadRequestException('Profile not found');
+    }
+
+    const topic = await this.prisma.projectTopic.findUnique({
+      where: { id: topicId },
+      include: {
+        group: true,
+        document: true,
+      },
+    });
+
+    if (!topic) {
+      throw new NotFoundException('Topic not found');
+    }
+
+    // Check the user belongs to the topic's group
+    const group = await this.groupsService.getMyGroup(userId);
+
+    if (!group || group.id !== topic.groupId) {
+      throw new ForbiddenException('You cannot edit this topic');
+    }
+
+    // Optional: prevent editing approved topics
+    if (topic.status === 'approved') {
+      throw new BadRequestException(
+        'Approved topics cannot be edited',
+      );
+    }
+
+    let documentData = {};
+
+    if (file) {
+      const extension = file.originalname.split('.').pop() || 'file';
+
+      const storagePath = `${group.id}/topic-submissions/${Date.now()}-${crypto.randomUUID()}.${extension}`;
+
+      const fileUrl = await this.supabaseService.uploadFile(
+        storagePath,
+        file.buffer,
+        file.mimetype,
+      );
+
+      if (topic.document) {
+        documentData = {
+          document: {
+            update: {
+              filename: file.originalname,
+              fileUrl,
+              fileSize: file.size,
+              mimeType: file.mimetype,
+            },
+          },
+        };
+      } else {
+        documentData = {
+          document: {
+            create: {
+              filename: file.originalname,
+              fileUrl,
+              fileSize: file.size,
+              mimeType: file.mimetype,
+            },
+          },
+        };
+      }
+    }
+
+    return this.prisma.projectTopic.update({
+      where: { id: topicId },
+      data: {
+        title: updateTopicDto.title,
+        description: updateTopicDto.description,
+        ...documentData,
+      },
+      include: {
+        document: true,
+      },
     });
   }
 }

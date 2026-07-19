@@ -27,10 +27,18 @@ export interface Group {
   teamCode: string; // e.g., A7DXQ
   department: Department;
   createdBy: string; // profile id of leader
-  members: string[]; // array of profile ids
-  isFull: boolean; // true if members.length >= 3
+  members: Array<Member>; // array of profile ids
+  isFull: boolean; // true if members.length >= 4
   meetLink?: string; // Pinned Google Meet link for topic discussion
   createdAt: string;
+}
+
+export interface Member {
+  groupId:string;
+  id: string;
+  profile: Profile;
+  joinedAt: string;
+  profileId: string;
 }
 
 export interface MentorAllocationForm {
@@ -91,6 +99,17 @@ export interface ProjectTopic {
   submittedAt: string;
   reviewedBy?: string; // mentor profile id
   reviewedAt?: string;
+  document?: TopicSubmissionDocument;
+}
+
+export interface TopicSubmissionDocument {
+  id: string;
+  topicId: string;
+  filename: string;
+  fileUrl: string;
+  fileSize: number;
+  mimeType: string;
+  uploadedAt: string;
 }
 
 export interface TopicMessage {

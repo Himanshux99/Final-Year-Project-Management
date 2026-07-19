@@ -139,8 +139,8 @@ export class GroupsService {
     }
 
     // Check if group is full
-    if (group.members.length >= 3) {
-      throw new BadRequestException('Group is full (max 3 members)');
+    if (group.members.length >= 4) {
+      throw new BadRequestException('Group is full (max 4 members)');
     }
 
     // Add member

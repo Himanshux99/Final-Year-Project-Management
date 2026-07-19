@@ -28,7 +28,7 @@ export class MentorAllocationsService {
     const allocations = await this.prisma.mentorAllocation.findMany({
       where: {
         mentorId: profile.id,
-        status: { not: 'waiting' },
+        // status: { not: 'waiting' },
       },
       include: {
         group: {
@@ -104,21 +104,50 @@ export class MentorAllocationsService {
 
     // Update in a transaction - accept this one, reject all others for the same group
     await this.prisma.$transaction(async (tx) => {
+      // Count already accepted teams for this mentor
+      const acceptedCount = await tx.mentorAllocation.count({
+        where: {
+          mentorId: profile.id,
+          status: 'accepted',
+        },
+      });
+
+      if (acceptedCount >= 3) {
+        throw new BadRequestException(
+          'Maximum limit of 3 teams has already been reached.',
+        );
+      }
+
       // Accept this allocation
       await tx.mentorAllocation.update({
         where: { id: allocationId },
         data: { status: 'accepted' },
       });
 
-      // Reject all other allocations for the same group
-      await tx.mentorAllocation.updateMany({
-        where: {
-          groupId: allocation.groupId,
-          formId: allocation.formId,
-          id: { not: allocationId },
-        },
-        data: { status: 'rejected' },
-      });
+      // // Reject all other mentor choices for this group
+      // await tx.mentorAllocation.updateMany({
+      //   where: {
+      //     groupId: allocation.groupId,
+      //     formId: allocation.formId,
+      //     id: { not: allocationId },
+      //   },
+      //   data: { status: 'rejected' },
+      // });
+
+      // If this was the THIRD accepted team, reject all remaining requests
+      if (acceptedCount + 1 === 3) {
+        await tx.mentorAllocation.updateMany({
+          where: {
+            mentorId: profile.id,
+            status: {
+              in: ['pending', 'waiting'],
+            },
+          },
+          data: {
+            status: 'rejected',
+          },
+        });
+      }
     });
 
     return { message: 'Team accepted successfully' };
@@ -171,8 +200,13 @@ export class MentorAllocationsService {
           groupId: allocation.groupId,
           formId: allocation.formId,
           status: 'waiting',
+          preferenceRank: {
+            gt: allocation.preferenceRank,
+          },
         },
-        orderBy: { preferenceRank: 'asc' },
+        orderBy: {
+          preferenceRank: 'asc',
+        },
       });
 
       if (nextWaiting) {
@@ -288,6 +322,65 @@ export class MentorAllocationsService {
           },
         },
       },
+    });
+  }
+
+  async removeTeam(groupId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const allocation = await tx.mentorAllocation.findFirst({
+        where: {
+          groupId,
+          status: "accepted",
+        },
+      });
+
+      if (!allocation) {
+        throw new NotFoundException("Accepted team assignment not found");
+      }
+
+      // Mark current allocation as rejected instead of deleting it
+      await tx.mentorAllocation.update({
+        where: {
+          id: allocation.id,
+        },
+        data: {
+          status: "rejected",
+        },
+      });
+
+      // // Remove the team's progress
+      // await tx.teamProgress.deleteMany({
+      //   where: {
+      //     groupId,
+      //   },
+      // });
+
+      // Find the next highest preference
+      const nextPreference = await tx.mentorAllocation.findFirst({
+        where: {
+          groupId,
+          status: {
+            in: ["waiting", "rejected"],
+          },
+        },
+        orderBy: {
+          preferenceRank: "asc",
+        },
+      });
+
+      // Make it pending
+      if (nextPreference) {
+        await tx.mentorAllocation.update({
+          where: {
+            id: nextPreference.id,
+          },
+          data: {
+            status: "pending",
+          },
+        });
+      }
+
+      return { message: "Team removed successfully" };
     });
   }
 }

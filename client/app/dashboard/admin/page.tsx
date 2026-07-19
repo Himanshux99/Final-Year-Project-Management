@@ -122,13 +122,13 @@ export default function AdminDashboard() {
             topicApproved = true;
             topicTitle = approvedTopic.title;
           }
-          const groupReviews = reviewSessions.filter(
-            (r) => r.groupId === group.id
-          );
+          // const groupReviews = reviewSessions.filter(
+          //   (r) => r.groupId === group.id
+          // );
 
-          const review1 = groupReviews.find((r) => r.reviewType === "review1");
-          const review2 = groupReviews.find((r) => r.reviewType === "review2");
-          const finalReview = groupReviews.find((r) => r.reviewType === "final");
+          // const review1 = groupReviews.find((r) => r.reviewType === "review1");
+          // const review2 = groupReviews.find((r) => r.reviewType === "review2");
+          // const finalReview = groupReviews.find((r) => r.reviewType === "final");
 
         } catch (error) {
           console.error(`Failed to load topics for group ${group.id}:`, error);

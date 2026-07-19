@@ -151,6 +151,7 @@ export class MentorPreferencesService {
 
     return this.getByGroup(group.id);
   }
+  
 
   async hasSubmittedPreferences(userId: string) {
     const preferences = await this.getMyPreferences(userId);

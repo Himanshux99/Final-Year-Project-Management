@@ -24,11 +24,20 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await authApi.login({ email, password });
+      // Append @vit.edu.in if it's missing
+      const normalizedEmail = email.trim().endsWith("@vit.edu.in")
+        ? email.trim()
+        : `${email.trim()}@vit.edu.in`;
+
+      const response = await authApi.login({
+        email: normalizedEmail,
+        password,
+      });
+
       await refreshAuth();
-      
+
       showToast("Login successful!", "success");
-      
+
       // Redirect based on profile existence
       if (response.profile) {
         router.push("/dashboard");
@@ -59,7 +68,7 @@ export default function LoginPage() {
               <div>
                 <label className="block text-sm font-medium mb-2">Email</label>
                 <Input
-                  type="email"
+                  type="text"
                   placeholder="your.email@college.edu"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}

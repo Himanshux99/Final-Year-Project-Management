@@ -31,10 +31,14 @@ import {
   ReviewStatus,
   ReviewMessage,
   ReviewType,
+  Department,
+  Group,
 } from "@/types";
+import { Label } from "./ui/label";
 
 interface ReviewSectionProps {
   reviewType: ReviewType;
+  group: Group;
   session: ReviewSession | null;
   messages: ReviewMessage[];
   currentUserId: string;
@@ -50,6 +54,43 @@ interface ReviewSectionProps {
   onMarkComplete: () => void;
   meetLink?: string;
   onSetMeetLink?: (link: string) => void;
+}
+
+type MemberContribution = {
+  id: string;
+  implementation: string;
+};
+
+type DecodedMember = {
+  id: string;
+  implementation: string;
+};
+
+function decodeMemberProgress(text: string): DecodedMember[] {
+  const regex = /<member\s+id="([^"]+)">([\s\S]*?)<\/member>/g;
+
+  const members: DecodedMember[] = [];
+  let match;
+
+  while ((match = regex.exec(text)) !== null) {
+    members.push({
+      id: match[1],
+      implementation: match[2].trim(),
+    });
+  }
+
+  return members;
+}
+
+function encodeMemberProgress(data: MemberContribution[]) {
+  return data
+    .map(
+      (member) =>
+        `<member id="${member.id}">
+${member.implementation.trim()}
+</member>`,
+    )
+    .join("\n\n");
 }
 
 function getReviewTitle(type: ReviewType): string {
@@ -157,6 +198,7 @@ export function ReviewSection({
   reviewType,
   session,
   messages,
+  group,
   currentUserId,
   currentUserName,
   currentUserRole,
@@ -171,22 +213,19 @@ export function ReviewSection({
   meetLink,
   onSetMeetLink,
 }: ReviewSectionProps) {
+  
   const [showSubmitDialog, setShowSubmitDialog] = React.useState(false);
   const [showFeedbackDialog, setShowFeedbackDialog] = React.useState(false);
-  const [percentage, setPercentage] = React.useState(
-    session?.progressPercentage || 0,
-  );
-  const [description, setDescription] = React.useState(
-    session?.progressDescription || "",
-  );
+  const [percentage, setPercentage] = React.useState(session?.progressPercentage || 0);
+
   const [feedback, setFeedback] = React.useState("");
   const [showChat, setShowChat] = React.useState(true);
 
+  const [progress, setProgress] = React.useState<Record<string, string>>({});
+  const [submitButtonDisabled, setSubmitButtonDisabled] = React.useState(true);
   const title = getReviewTitle(reviewType);
   const reviewDescription = getReviewDescription(reviewType);
-  const statusConfig = session
-    ? getStatusConfig(session.status)
-    : getStatusConfig("not_started");
+  const statusConfig = session ? getStatusConfig(session.status) : getStatusConfig("not_started");
   const StatusIcon = statusConfig.icon;
 
   // Convert ReviewMessages to ThreadMessages
@@ -201,11 +240,17 @@ export function ReviewSection({
   }));
 
   const handleSubmitProgress = () => {
-    if (description.trim()) {
+    const encoded = encodeMemberProgress(
+      group.members.map((member) => ({
+        id: member.id,
+        implementation: progress[member.id] ?? "",
+      })),
+    );
+    if (encoded.trim()) {
       if (session) {
-        onUpdateProgress(percentage, description.trim());
+        onUpdateProgress(percentage, encoded.trim());
       } else {
-        onSubmitProgress(percentage, description.trim());
+        onSubmitProgress(percentage, encoded.trim());
       }
       setShowSubmitDialog(false);
     }
@@ -218,6 +263,32 @@ export function ReviewSection({
       setShowFeedbackDialog(false);
     }
   };
+
+  React.useEffect(() => {
+    const allMembersFilled = group.members.every(
+      (member) => (progress[member.id] ?? "").trim().length > 0
+    );
+
+    setSubmitButtonDisabled(!(allMembersFilled && percentage > 0));
+  }, [progress, percentage, group]);  
+
+  React.useEffect(() => {
+    if (!showSubmitDialog) return;
+
+    setPercentage(session?.progressPercentage || 0);
+
+    if (session?.progressDescription) {
+      const previous = decodeMemberProgress(session.progressDescription);
+
+      setProgress(
+        Object.fromEntries(
+          previous.map((m) => [m.id, m.implementation])
+        )
+      );
+    } else {
+      setProgress({});
+    }
+  }, [showSubmitDialog, session]);
 
   // Locked state
   if (!isUnlocked) {
@@ -256,11 +327,8 @@ export function ReviewSection({
   return (
     <div className="space-y-4">
       {/* Status Banner */}
-      <div
-        className={`rounded-lg p-4 border ${
-          session?.status === "completed"
-            ? "bg-green-50 border-green-200"
-            : session?.status === "feedback_given"
+      <div className={`rounded-lg p-4 border ${session?.status === "completed" ? "bg-green-50 border-green-200" 
+              : session?.status === "feedback_given"
               ? "bg-blue-50 border-blue-200"
               : "bg-gray-50 border-gray-200"
         }`}
@@ -296,7 +364,6 @@ export function ReviewSection({
                   size="sm"
                   onClick={() => {
                     setPercentage(session?.progressPercentage || 0);
-                    setDescription(session?.progressDescription || "");
                     setShowSubmitDialog(true);
                   }}
                 >
@@ -356,7 +423,11 @@ export function ReviewSection({
                   What&apos;s been implemented:
                 </h4>
                 <p className="text-sm text-gray-600 whitespace-pre-wrap bg-gray-50 p-3 rounded-md">
-                  {session.progressDescription}
+                  {decodeMemberProgress(session.progressDescription).map((member) => (
+                    <div key={member.id}>
+                      <strong>{group?.members.find((m) => m.id === member.id)?.profile.name}:</strong> {member.implementation}
+                    </div>
+                  ))}
                 </p>
                 <p className="text-xs text-gray-400 mt-1">
                   Last updated: {new Date(session.submittedAt).toLocaleString()}
@@ -483,12 +554,22 @@ export function ReviewSection({
               <label className="text-sm font-medium text-gray-700">
                 What have you implemented?
               </label>
-              <Textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Describe the features you've implemented, challenges faced, and next steps..."
-                className="mt-1 min-h-[150px]"
-              />
+              {group?.members.map((member) => (
+                <div key={member.id} className="space-y-2">
+                  <Label>{member.profile.name}</Label>
+
+                  <Textarea
+                    value={progress[member.id] ?? ""}
+                    onChange={(e) =>
+                      setProgress((prev) => ({
+                        ...prev,
+                        [member.id]: e.target.value,
+                      }))
+                    }
+                    placeholder={`What did ${member.profile.name} implement?`}
+                  />
+                </div>
+              ))}
             </div>
           </div>
           <DialogFooter>
@@ -500,7 +581,7 @@ export function ReviewSection({
             </Button>
             <Button
               onClick={handleSubmitProgress}
-              disabled={!description.trim()}
+              disabled={submitButtonDisabled}
             >
               <Send className="h-4 w-4 mr-1" />
               {session ? "Update" : "Submit"}

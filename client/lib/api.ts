@@ -55,6 +55,8 @@ export const authApi = {
   },
 };
 
+
+
 // ============ PROFILE API ============
 
 export interface CreateProfileRequest {
@@ -303,15 +305,23 @@ export const mentorAllocationApi = {
   reject: async (id: string): Promise<{ message: string }> => {
     return api.post<{ message: string }>(`/mentor-allocations/${id}/reject`);
   },
+
+  removeTeam: async (groupId: string): Promise<{ message: string }> => {
+    return api.delete<{ message: string }>(`/mentor-allocations/groups/${groupId}`);
+  }
 };
 
 // ============ PROJECT TOPICS API ============
-
 import { ProjectTopic, TopicMessage, TopicStatus } from "@/types";
 
 export interface CreateTopicRequest {
   title: string;
   description: string;
+}
+
+export interface UpdateTopicRequest {
+  title?: string;
+  description?: string;
 }
 
 export interface ReviewTopicRequest {
@@ -326,9 +336,38 @@ export interface AddTopicMessageRequest {
 }
 
 export const projectTopicsApi = {
-  create: async (data: CreateTopicRequest): Promise<ProjectTopic> => {
-   
+  create: async (data: CreateTopicRequest, file?: File): Promise<ProjectTopic> => {
+    if (file) {
+      return api.uploadWithFields<ProjectTopic>("/project-topics", file, {
+        title: data.title,
+        description: data.description,
+      });
+    }
     return api.post<ProjectTopic>("/project-topics", data);
+  },
+
+  // NEW: Edit topic
+  update: async (
+    topicId: string,
+    data: UpdateTopicRequest,
+    file?: File,
+  ): Promise<ProjectTopic> => {
+    if (file) {
+      return api.uploadWithFields<ProjectTopic>(
+        `/project-topics/${topicId}`,
+        file,
+        {
+          title: data.title ?? "",
+          description: data.description ?? "",
+        },
+        "PATCH", // if uploadWithFields supports custom methods
+      );
+    }
+
+    return api.patch<ProjectTopic>(
+      `/project-topics/${topicId}`,
+      data,
+    );
   },
 
   getMyGroupTopics: async (): Promise<ProjectTopic[]> => {

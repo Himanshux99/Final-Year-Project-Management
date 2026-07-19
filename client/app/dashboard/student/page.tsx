@@ -2,12 +2,23 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Users, Plus, UserPlus, FileText, ClipboardList, RefreshCw } from "lucide-react";
+import {
+  Users,
+  Plus,
+  UserPlus,
+  FileText,
+  ClipboardList,
+  RefreshCw,
+} from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { StatCardSkeleton, CardSkeleton, ListSkeleton } from "@/components/ui/skeleton";
+import {
+  StatCardSkeleton,
+  CardSkeleton,
+  ListSkeleton,
+} from "@/components/ui/skeleton";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -18,9 +29,16 @@ import {
   mentorAllocationApi,
   projectTopicsApi,
   GroupWithMembers,
+  authApi,
 } from "@/lib/api";
 import { Group, Profile } from "@/types";
-import { getCachedData, setCachedData, invalidateCache, CACHE_KEYS, CACHE_TTL } from "@/lib/cache";
+import {
+  getCachedData,
+  setCachedData,
+  invalidateCache,
+  CACHE_KEYS,
+  CACHE_TTL,
+} from "@/lib/cache";
 
 export default function StudentDashboard() {
   const router = useRouter();
@@ -40,6 +58,7 @@ export default function StudentDashboard() {
     status: string;
     currentPriority?: number;
   } | null>(null);
+  const [mentorSelected, setMentorSelected] = useState<any[]>([]);
   const [hasApprovedTopic, setHasApprovedTopic] = useState(false);
 
   useEffect(() => {
@@ -59,72 +78,141 @@ export default function StudentDashboard() {
     loadGroupData();
   }, [user, profile, router, authLoading]);
 
-  const loadGroupData = useCallback(async (forceRefresh = false) => {
-    if (!profile) return;
+  useEffect(() => {
+    const fetchMentors = async () => {
+      if (!hasSubmittedPreferences) return;
 
-    try {
-      setInitialLoading(true);
-      
-      // Check cache first (unless forced refresh)
-      if (!forceRefresh) {
-        const cachedGroup = getCachedData<GroupWithMembers>(CACHE_KEYS.MY_GROUP);
-        if (cachedGroup) {
-          setGroup(cachedGroup);
-          if (cachedGroup.members) {
-            setMembers(cachedGroup.members.map((m) => m.profile));
+      try {
+        const allocations = await mentorAllocationApi.getForGroup();
+
+        const mentorSelectedWithNames = await Promise.all(
+          allocations.map(async (allocation) => {
+            const mentor = await profileApi.getById(allocation.mentorId);
+            console.log("Fetched mentor:", allocation);
+            return {
+              ...allocation,
+              mentorName: mentor.name, // adjust if your API returns fullName, firstName, etc.
+            };
+          }),
+        );
+
+        setMentorSelected(mentorSelectedWithNames);
+      } catch (error) {
+        console.error("Failed to fetch mentors:", error);
+      }
+    };
+
+    fetchMentors();
+  }, [hasSubmittedPreferences]);
+
+  const loadGroupData = useCallback(
+    async (forceRefresh = false) => {
+      if (!profile) return;
+
+      try {
+        setInitialLoading(true);
+
+        // Check cache first (unless forced refresh)
+        if (!forceRefresh) {
+          const cachedGroup = getCachedData<GroupWithMembers>(
+            CACHE_KEYS.MY_GROUP,
+          );
+          if (cachedGroup) {
+            setGroup(cachedGroup);
+            if (cachedGroup.members) {
+              setMembers(cachedGroup.members.map((m) => m.profile));
+            }
+            setInitialLoading(false);
+            // Continue loading other data in background
           }
-          setInitialLoading(false);
-          // Continue loading other data in background
         }
-      }
-      
-      const userGroup = await groupApi.getMyGroup();
-      setGroup(userGroup);
-      if (userGroup) {
-        setCachedData(CACHE_KEYS.MY_GROUP, userGroup, CACHE_TTL.MEDIUM);
-      }
 
-      if (userGroup) {
-        const groupMembers = userGroup.members.map((m) => m.profile);
-        setMembers(groupMembers);
+        const userGroup = await groupApi.getMyGroup();
+        setGroup(userGroup);
+        if (userGroup) {
+          setCachedData(CACHE_KEYS.MY_GROUP, userGroup, CACHE_TTL.MEDIUM);
+        }
 
-        // Check if mentor form is active
-        const activeForm = await mentorFormApi.getActive();
-        setMentorFormActive(!!activeForm);
+        if (userGroup) {
+          const groupMembers = userGroup.members.map((m) => m.profile);
+          setMembers(groupMembers);
 
-        // Check if preferences submitted
+          // Check if mentor form is active
+          const activeForm = await mentorFormApi.getActive();
+          setMentorFormActive(!!activeForm);
+
+          // Check if preferences submitted
+          const prefResponse = await mentorPreferenceApi.hasSubmitted();
+          setHasSubmittedPreferences(prefResponse.hasSubmitted);
+
+          // Check mentor allocation status
+          const status = await mentorAllocationApi.getStatus();
+          if (status.status === "accepted" && status.mentorName) {
+            setMentorStatus({
+              mentorName: status.mentorName,
+              status: "Accepted",
+            });
+          } else if (status.status === "pending") {
+            setMentorStatus({
+              mentorName: "",
+              status: "Pending",
+              currentPriority: status.currentPriority,
+            });
+          }
+
+          // Check if topic is approved
+          try {
+            const topics = await projectTopicsApi.getMyGroupTopics();
+            setHasApprovedTopic(topics.some((t) => t.status === "approved"));
+          } catch (error) {
+            console.error("Failed to load topics:", error);
+          }
+        }
+
         const prefResponse = await mentorPreferenceApi.hasSubmitted();
         setHasSubmittedPreferences(prefResponse.hasSubmitted);
 
-        // Check mentor allocation status
-        const status = await mentorAllocationApi.getStatus();
-        if (status.status === "accepted" && status.mentorName) {
-          setMentorStatus({
-            mentorName: status.mentorName,
-            status: "Accepted",
-          });
-        } else if (status.status === "pending") {
-          setMentorStatus({
-            mentorName: "",
-            status: "Pending",
-            currentPriority: status.currentPriority,
-          });
+        if (prefResponse.hasSubmitted) {
+          await fetchMentors();
         }
 
-        // Check if topic is approved
-        try {
-          const topics = await projectTopicsApi.getMyGroupTopics();
-          setHasApprovedTopic(topics.some((t) => t.status === "approved"));
-        } catch (error) {
-          console.error("Failed to load topics:", error);
-        }
+        setInitialLoading(false);
+      } catch (error: any) {
+        console.error("Failed to load group data:", error);
+        setInitialLoading(false);
       }
-      setInitialLoading(false);
-    } catch (error: any) {
-      console.error("Failed to load group data:", error);
-      setInitialLoading(false);
+    },
+    [profile],
+  );
+
+  
+
+  const fetchMentors = useCallback(async () => {
+    if (!hasSubmittedPreferences) return;
+
+    try {
+      const allocations = await mentorAllocationApi.getForGroup();
+
+      const mentorSelectedWithNames = await Promise.all(
+        allocations.map(async (allocation) => {
+          const mentor = await profileApi.getById(allocation.mentorId);
+
+          return {
+            ...allocation,
+            mentorName: mentor.name,
+          };
+        }),
+      );
+
+      setMentorSelected(mentorSelectedWithNames);
+    } catch (error) {
+      console.error("Failed to fetch mentors:", error);
     }
-  }, [profile]);
+  }, [hasSubmittedPreferences]);              
+
+  useEffect(() => {
+  fetchMentors();
+}, [fetchMentors]);
 
   const handleRefresh = () => {
     invalidateCache(CACHE_KEYS.MY_GROUP);
@@ -182,7 +270,9 @@ export default function StudentDashboard() {
               size="sm"
               disabled={initialLoading}
             >
-              <RefreshCw className={`h-4 w-4 mr-2 ${initialLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw
+                className={`h-4 w-4 mr-2 ${initialLoading ? "animate-spin" : ""}`}
+              />
               Refresh
             </Button>
           </div>
@@ -346,7 +436,59 @@ export default function StudentDashboard() {
                   {hasSubmittedPreferences ? (
                     <div className="space-y-3">
                       <div className="p-4 bg-green-50 border border-green-200 rounded-md">
-                        <p className="text-green-900 font-medium">
+                        {mentorSelected.map((mentor, index) => {
+                          const isRejected = mentor.status === "rejected";
+                          const isWaitingOrPending =
+                            mentor.status === "waiting" ||
+                            mentor.status === "pending";
+
+                          return (
+                            <div
+                              key={mentor.mentorId}
+                              className={`flex justify-between items-center mb-2 ${
+                                isRejected ? "opacity-50" : ""
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                {/* Preference Badge */}
+                                <span
+                                  className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                    isRejected
+                                      ? "bg-gray-200 text-gray-600"
+                                      : "bg-green-200 text-green-800"
+                                  }`}
+                                >
+                                  #{mentor.preference || index + 1}
+                                </span>
+
+                                {/* Mentor Name */}
+                                <p
+                                  className={`font-medium ${
+                                    isRejected
+                                      ? "text-gray-500 line-through"
+                                      : "text-gray-800"
+                                  }`}
+                                >
+                                  {mentor.mentorName}
+                                </p>
+                              </div>
+
+                              {/* Status Badge */}
+                              {isRejected && (
+                                <span className="text-xs font-medium text-gray-500 bg-gray-200 px-2 py-0.5 rounded">
+                                  Rejected
+                                </span>
+                              )}
+                              {isWaitingOrPending && (
+                                <span className="text-xs font-medium text-amber-700 bg-amber-100 px-2 py-0.5 rounded capitalize">
+                                  {mentor.status}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+
+                        <p className="text-green-900 font-medium mt-3 pt-2 border-t border-green-200">
                           ✓ Preferences Submitted
                         </p>
                       </div>

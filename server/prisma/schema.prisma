@@ -177,6 +177,7 @@ enum AllocationStatus {
   accepted
   rejected
   waiting
+  taken
 }
 
 // Counter for group serial numbers per department
@@ -210,10 +211,26 @@ model ProjectTopic {
   reviewedAt  DateTime?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
+  edited Boolean     @default(false) // Indicates if the topic was edited after submission
+  editedAt DateTime? // Timestamp of the last edit
 
   group    Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
   messages TopicMessage[]
+  document TopicSubmissionDocument?
   @@index([groupId])
+}
+
+// A topic submission may include one supporting document.
+model TopicSubmissionDocument {
+  id          String   @id @default(uuid())
+  topicId     String   @unique
+  filename    String
+  fileUrl     String
+  fileSize    Int
+  mimeType    String
+  uploadedAt  DateTime @default(now())
+
+  topic ProjectTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
 }
 
 model TopicMessage {
