@@ -118,7 +118,7 @@ export default function FacultyDashboard() {
         }
 
         const mentorAllocations = await mentorAllocationApi.getForMentor();
-        console.log("Fetched mentor allocations:", mentorAllocations);
+        // console.log("Fetched mentor allocations:", mentorAllocations);
         // Transform allocations to include flat members array
         const transformedAllocations: AllocationWithDetails[] =
           mentorAllocations.map((allocation: any) => ({
@@ -126,7 +126,7 @@ export default function FacultyDashboard() {
             members:
               allocation.group?.members?.map((m: any) => m.profile) || [],
           }));
-        console.log("Transformed allocations:", transformedAllocations);
+        // console.log("Transformed allocations:", transformedAllocations);
 
         // Sort: pending first, then by preference rank
         transformedAllocations.sort((a, b) => {

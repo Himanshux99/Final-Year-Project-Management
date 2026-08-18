@@ -115,39 +115,65 @@ export class EvaluationsService {
     });
 
     // Create evaluation with student grades
-    const evaluation = await this.prisma.reviewEvaluation.create({
-      data: {
-        sessionId: dto.sessionId,
-        groupId: dto.groupId,
-        reviewType: dto.reviewType,
-        evaluationDate: dto.evaluationDate,
-        division: dto.division,
-        projectGuide: dto.projectGuide,
-        projectTitle: dto.projectTitle,
-        projectCategory: dto.projectCategory,
-        projectType: dto.projectType,
-        projectDomain: dto.projectDomain,
-        qualityGrade: dto.qualityGrade,
-        projectNature: dto.projectNature,
-        completionPercentage: dto.completionPercentage,
-        remarks: dto.remarks,
-        filledBy: profile.id,
-        studentGrades: {
-          create: validatedGrades,
+    const evaluation = await this.prisma.$transaction(async (tx) => {
+      const evaluation = await tx.reviewEvaluation.create({
+        data: {
+          sessionId: dto.sessionId,
+          groupId: dto.groupId,
+          reviewType: dto.reviewType,
+          evaluationDate: dto.evaluationDate,
+          division: dto.division,
+          projectGuide: dto.projectGuide,
+          projectTitle: dto.projectTitle,
+          projectCategory: dto.projectCategory,
+          projectType: dto.projectType,
+          projectDomain: dto.projectDomain,
+          qualityGrade: dto.qualityGrade,
+          projectNature: dto.projectNature,
+          completionPercentage: dto.completionPercentage,
+          remarks: dto.remarks,
+          filledBy: profile.id,
+
+          studentGrades: {
+            create: validatedGrades,
+          },
         },
-      },
-      include: {
-        studentGrades: true,
-        mentor: {
-          select: { id: true, name: true, email: true },
+
+        include: {
+          studentGrades: true,
+          mentor: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          group: {
+            select: {
+              id: true,
+              groupId: true,
+              teamCode: true,
+            },
+          },
         },
-        group: {
-          select: { id: true, groupId: true, teamCode: true },
+      });
+
+      const a = await tx.reviewSession.update({
+        where: {
+          id: dto.sessionId,
         },
-      },
+        data: {
+          progressPercentage: dto.completionPercentage,
+        },
+      });
+
+      console.log('Updated session progress percentage:', a.progressPercentage);
+
+      return evaluation;
     });
 
     return evaluation;
+
   }
 
   /**

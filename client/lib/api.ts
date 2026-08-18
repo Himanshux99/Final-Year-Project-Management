@@ -446,6 +446,10 @@ export const reviewsApi = {
     return api.post<ReviewRollout>("/reviews/rollout", { reviewType });
   },
 
+  removeRollout: async (reviewType: ReviewType): Promise<{ message: string }> => {
+    return api.delete<{ message: string }>(`/reviews/rollout/${reviewType}`);
+  },
+
   getRollout: async (reviewType: ReviewType): Promise<ReviewRollout | null> => {
     return api.get<ReviewRollout | null>(`/reviews/rollout/${reviewType}`);
   },
@@ -674,3 +678,21 @@ export const evaluationsApi = {
     return api.get<ReviewEvaluation[]>(`/evaluations/admin${queryString ? `?${queryString}` : ""}`);
   },
 };
+
+// ============ MENTOR ALLOCATIONS STATS API ============
+
+// import { AvailableMentor } from "@/types";
+
+export type MentorAllocationStats = AvailableMentor & {
+  firstPreferenceCount?: number;
+  totalPreferenceCount?: number;
+  totalRejectedCount?: number;
+  acceptedCount?: number;
+  firstPreferenceTeams?: string[];
+  totalPreferenceTeams?: string[];
+  acceptedTeams?: string[];
+};
+
+export async function getMentorAllocationStats(): Promise<MentorAllocationStats[]> {
+  return api.get<MentorAllocationStats[]>(`/mentor-allocations/stats`);
+}

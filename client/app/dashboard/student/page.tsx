@@ -88,7 +88,7 @@ export default function StudentDashboard() {
         const mentorSelectedWithNames = await Promise.all(
           allocations.map(async (allocation) => {
             const mentor = await profileApi.getById(allocation.mentorId);
-            console.log("Fetched mentor:", allocation);
+            // console.log("Fetched mentor:", allocation);
             return {
               ...allocation,
               mentorName: mentor.name, // adjust if your API returns fullName, firstName, etc.

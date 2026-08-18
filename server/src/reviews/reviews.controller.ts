@@ -7,6 +7,7 @@ import {
   Patch,
   UseGuards,
   Request,
+  Delete,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
 import { ReviewsService } from './reviews.service';
@@ -29,6 +30,15 @@ export class ReviewsController {
     @Body() rolloutDto: RolloutReviewDto,
   ) {
     return this.reviewsService.rolloutReview(req.user.userId, rolloutDto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('rollout/:reviewType')
+  async removeRollout(
+    @Request() req: ExpressRequest,
+    @Param('reviewType') reviewType: ReviewType,
+  ) {
+    return this.reviewsService.removeReviewRollout(req.user.userId, reviewType);
   }
 
   @UseGuards(JwtAuthGuard)

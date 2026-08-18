@@ -148,7 +148,7 @@ export function TopicApprovalSection({
   const handleSubmitTopic = () => {
     if (newTopicTitle.trim() && newTopicDescription.trim()) {
       if (editingTopic) {
-        console.log("Updating topic:", editingTopic.title, newTopicDescription, newTopicFile);
+        // console.log("Updating topic:", editingTopic.title, newTopicDescription, newTopicFile);
         onUpdateTopic(
           editingTopic.id,
           newTopicTitle.trim(),
@@ -330,7 +330,7 @@ export function TopicApprovalSection({
                             <ChevronDown className="h-4 w-4 text-gray-400" />
                           )}
                         </div>
-                        <Button
+                        {currentUserRole === "student"?<Button
                           size="sm"
                           variant="outline"
                           onClick={(e) => {
@@ -339,7 +339,8 @@ export function TopicApprovalSection({
                           }}
                         >
                           Edit
-                        </Button>
+                        </Button>:null}
+                        
                       </div>
 
                       {/* Expanded Content */}

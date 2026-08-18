@@ -1,7 +1,20 @@
 "use client";
 
 import * as React from "react";
-import { Users, UserPlus, AlertCircle, CheckCircle } from "lucide-react";
+import {
+  getMentorAllocationStats,
+  type MentorAllocationStats,
+} from "@/lib/api";
+
+import {
+  Search,
+  Users,
+  UserPlus,
+  AlertCircle,
+  CheckCircle2,
+  ArrowRight,
+} from "lucide-react";
+
 import {
   Dialog,
   DialogContent,
@@ -10,9 +23,22 @@ import {
   DialogDescription,
   DialogFooter,
 } from "./ui/dialog";
+
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { UnassignedGroup, AvailableMentor } from "@/types";
+import { Input } from "./ui/input";
+import { Separator } from "./ui/separator";
+
+import { AvailableMentor, UnassignedGroup } from "@/types";
+
+// type MentorAllocationStats = AvailableMentor & {
+//   firstPreferenceCount?: number;
+//   totalPreferenceCount?: number;
+//   acceptedCount?: number;
+//   firstPreferenceTeams?: string[];
+//   totalPreferenceTeams?: string[];
+//   acceptedTeams?: string[];
+// };
 
 interface ManualAllocationModalProps {
   open: boolean;
@@ -20,7 +46,6 @@ interface ManualAllocationModalProps {
   unassignedGroups: UnassignedGroup[];
   availableMentors: AvailableMentor[];
   onAllocate: (groupId: string, mentorId: string) => Promise<void>;
-  loading?: boolean;
 }
 
 export function ManualAllocationModal({
@@ -29,209 +54,323 @@ export function ManualAllocationModal({
   unassignedGroups,
   availableMentors,
   onAllocate,
-  loading,
 }: ManualAllocationModalProps) {
   const [selectedGroup, setSelectedGroup] = React.useState<string | null>(null);
   const [selectedMentor, setSelectedMentor] = React.useState<string | null>(
     null,
   );
+
+  const [groupSearch, setGroupSearch] = React.useState("");
+  const [mentorSearch, setMentorSearch] = React.useState("");
+
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [mentorStats, setMentorStats] = React.useState<MentorAllocationStats[]>(
+    [],
+  );
+  const [loadingMentorStats, setLoadingMentorStats] = React.useState(false);
 
-  const handleAllocate = async () => {
-    if (!selectedGroup || !selectedMentor) return;
+  React.useEffect(() => {
+    if (!open) return;
 
-    setIsSubmitting(true);
-    try {
-      await onAllocate(selectedGroup, selectedMentor);
-      setSelectedGroup(null);
-      setSelectedMentor(null);
-      onClose();
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+    setLoadingMentorStats(true);
+    getMentorAllocationStats()
+      .then(setMentorStats)
+      .finally(() => setLoadingMentorStats(false));
+  }, [open]);
 
-  const handleClose = () => {
-    setSelectedGroup(null);
-    setSelectedMentor(null);
-    onClose();
-  };
+  const mentorsWithStats = React.useMemo(
+    () =>
+      availableMentors.map((mentor) => ({
+        ...mentor,
+        ...mentorStats.find((stat) => stat.id === mentor.id),
+      })),
+    [availableMentors, mentorStats],
+  );
+
+  const filteredGroups = unassignedGroups.filter((g) =>
+    `${g.groupId} ${g.teamCode} ${g.leaderName}`
+      .toLowerCase()
+      .includes(groupSearch.toLowerCase()),
+  );
+
+  const filteredMentors = mentorsWithStats.filter((m) =>
+    `${m.name} ${m.email} ${m.domains}`
+      .toLowerCase()
+      .includes(mentorSearch.toLowerCase()),
+  );
 
   const selectedGroupData = unassignedGroups.find(
     (g) => g.id === selectedGroup,
   );
+
   const selectedMentorData = availableMentors.find(
     (m) => m.id === selectedMentor,
   );
 
+  async function handleAllocate() {
+    if (!selectedGroup || !selectedMentor) return;
+
+    setIsSubmitting(true);
+
+    try {
+      await onAllocate(selectedGroup, selectedMentor);
+
+      setSelectedGroup(null);
+      setSelectedMentor(null);
+      setGroupSearch("");
+      setMentorSearch("");
+
+      onClose();
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function handleClose() {
+    setSelectedGroup(null);
+    setSelectedMentor(null);
+    setGroupSearch("");
+    setMentorSearch("");
+
+    onClose();
+  }
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-7xl h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <UserPlus className="h-5 w-5" />
             Manual Mentor Allocation
           </DialogTitle>
+
           <DialogDescription>
-            Assign a mentor to a group that hasn&apos;t been allocated through
-            the normal flow.
+            Select an unassigned group and assign an available mentor.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
-          {/* Step 1: Select Group */}
-          <div>
-            <h4 className="font-medium text-sm text-gray-700 mb-2">
-              Step 1: Select an Unassigned Group
-            </h4>
-            {unassignedGroups.length === 0 ? (
-              <div className="text-center py-6 bg-gray-50 rounded-lg border border-dashed">
-                <CheckCircle className="h-8 w-8 text-green-500 mx-auto mb-2" />
-                <p className="text-sm text-gray-600">
-                  All groups have mentors assigned!
-                </p>
+        <div className="grid grid-cols-[2fr_3fr] gap-6 flex-1 overflow-hidden">
+          {/* GROUPS */}
+          <div className="flex flex-col border rounded-sm overflow-hidden">
+            <div className="p-4 border-b bg-muted/40">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="font-semibold">Unassigned Groups</h3>
+                <Badge>{unassignedGroups.length}</Badge>
               </div>
-            ) : (
-              <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-2">
-                {unassignedGroups.map((group) => (
-                  <label
-                    key={group.id}
-                    className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                      selectedGroup === group.id
-                        ? "bg-primary/10 border-primary border"
-                        : "hover:bg-gray-50 border border-transparent"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="group"
-                      checked={selectedGroup === group.id}
-                      onChange={() => setSelectedGroup(group.id)}
-                      className="h-4 w-4 text-primary"
-                    />
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{group.groupId}</span>
-                        <span className="text-xs text-gray-400 font-mono">
-                          {group.teamCode}
-                        </span>
-                        <Badge variant="outline" className="text-xs">
-                          <Users className="h-3 w-3 mr-1" />
+
+              <div className="relative">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search groups..."
+                  className="pl-9"
+                  value={groupSearch}
+                  onChange={(e) => setGroupSearch(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="overflow-auto p-3 space-y-3">
+              {filteredGroups.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-muted-foreground py-10">
+                  <CheckCircle2 className="h-10 w-10 mb-3 text-green-500" />
+                  All groups allocated
+                </div>
+              ) : (
+                filteredGroups.map((group) => {
+                  const active = selectedGroup === group.id;
+
+                  return (
+                    <button
+                      key={group.id}
+                      onClick={() => setSelectedGroup(group.id)}
+                      className={`w-full rounded-sm border text-left p-4 transition ${
+                        active
+                          ? "border-primary bg-primary/5 shadow-md"
+                          : "hover:border-primary/30 hover:bg-muted/40"
+                      }`}
+                    >
+                      <div className="flex justify-between">
+                        <div>
+                          <h4 className="font-semibold">
+                            {group.groupId}{" "}
+                            <span className="text-muted-foreground">
+                              ({group.teamCode})
+                            </span>
+                          </h4>
+
+                          <p className="text-sm text-muted-foreground">
+                            {group.leaderName}
+                          </p>
+                        </div>
+
+                        <Badge variant="outline">
+                          <Users className="mr-1 h-3 w-3" />
                           {group.memberCount}
                         </Badge>
                       </div>
-                      <p className="text-sm text-gray-600">
-                        Leader: {group.leaderName}
-                      </p>
-                      {group.hasSubmittedPreferences && (
-                        <p className="text-xs text-amber-600 mt-1">
-                          <AlertCircle className="h-3 w-3 inline mr-1" />
-                          Has pending preferences (will be overridden)
-                        </p>
-                      )}
-                    </div>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
 
-          {/* Step 2: Select Mentor */}
-          <div>
-            <h4 className="font-medium text-sm text-gray-700 mb-2">
-              Step 2: Select a Mentor
-            </h4>
-            {availableMentors.length === 0 ? (
-              <div className="text-center py-6 bg-gray-50 rounded-lg border border-dashed">
-                <AlertCircle className="h-8 w-8 text-amber-500 mx-auto mb-2" />
-                <p className="text-sm text-gray-600">
-                  No mentors available. Roll out the mentor allocation form
-                  first.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-2">
-                {availableMentors.map((mentor) => (
-                  <label
-                    key={mentor.id}
-                    className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                      selectedMentor === mentor.id
-                        ? "bg-primary/10 border-primary border"
-                        : "hover:bg-gray-50 border border-transparent"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="mentor"
-                      checked={selectedMentor === mentor.id}
-                      onChange={() => setSelectedMentor(mentor.id)}
-                      className="h-4 w-4 text-primary"
-                    />
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{mentor.name}</span>
-                        {mentor.role === "super_admin" && (
-                          <Badge variant="secondary" className="text-xs">
-                            Coordinator
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-sm text-gray-500">{mentor.email}</p>
-                      {mentor.domains && (
-                        <div className="flex gap-1 mt-1 flex-wrap">
-                          {mentor.domains.split(",").map((domain, i) => (
-                            <span
-                              key={i}
-                              className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded"
-                            >
-                              {domain.trim()}
-                            </span>
-                          ))}
+                      {group.hasSubmittedPreferences && (
+                        <div className="mt-3 text-xs text-amber-600 flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3" />
+                          Preferences already submitted
                         </div>
                       )}
-                    </div>
-                  </label>
-                ))}
-              </div>
-            )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
 
-          {/* Summary */}
-          {selectedGroup && selectedMentor && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h4 className="font-medium text-blue-900 mb-2">
-                Allocation Summary
-              </h4>
-              <p className="text-sm text-blue-800">
-                Assign{" "}
-                <span className="font-semibold">{selectedMentorData?.name}</span>{" "}
-                as mentor for group{" "}
-                <span className="font-semibold">
-                  {selectedGroupData?.groupId}
-                </span>{" "}
-                (led by {selectedGroupData?.leaderName})
+          {/* MENTORS */}
+          <div className="flex flex-col border rounded-sm overflow-hidden">
+            <div className="p-4 border-b bg-muted/40">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="font-semibold">Available Mentors</h3>
+                <Badge>{availableMentors.length}</Badge>
+              </div>
+
+              <div className="relative">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search mentors..."
+                  className="pl-9"
+                  value={mentorSearch}
+                  onChange={(e) => setMentorSearch(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="overflow-auto p-3 space-y-3">
+              {filteredMentors.length === 0 ? (
+                <div className="h-full flex flex-col justify-center items-center text-muted-foreground py-10">
+                  <AlertCircle className="h-10 w-10 text-yellow-500 mb-3" />
+                  No mentors available
+                </div>
+              ) : (
+                filteredMentors.map((mentor) => {
+                  const active = selectedMentor === mentor.id;
+
+                  const mentorData = mentor as MentorAllocationStats;
+
+                  const firstPreferenceCount =
+                    mentorData.firstPreferenceCount ??
+                    mentorData.firstPreferenceTeams?.length ??
+                    0;
+
+                  const totalRejectedCount = mentorData.totalRejectedCount ?? 0;
+
+                  const totalPreferenceCount =
+                    mentorData.totalPreferenceCount ??
+                    mentorData.totalPreferenceTeams?.length ??
+                    0;
+
+                  const acceptedCount =
+                    mentorData.acceptedCount ??
+                    mentorData.acceptedTeams?.length ??
+                    0;
+
+                  return (
+                    <button
+                      key={mentor.id}
+                      onClick={() => setSelectedMentor(mentor.id)}
+                      className={`w-full rounded-sm border text-left p-4 transition ${
+                        active
+                          ? "border-primary bg-primary/5 shadow-md"
+                          : "hover:border-primary/30 hover:bg-muted/40"
+                      }`}
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h4 className="font-semibold">
+                            {mentor.name}{" "}
+                            <span className="text-muted-foreground text-sm">
+                              {mentor.email}
+                            </span>
+                          </h4>
+
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <Badge variant="outline">
+                              1st pref: {firstPreferenceCount}
+                            </Badge>
+
+                            <Badge variant="outline">
+                              Total rejected: {totalRejectedCount ?? 0}
+                            </Badge>
+
+                            <Badge variant="outline">
+                              Total pref: {totalPreferenceCount}
+                            </Badge>
+
+                            <Badge variant="outline">
+                              Accepted: {acceptedCount}
+                            </Badge>
+                          </div>
+                        </div>
+
+                        {mentor.role === "super_admin" && (
+                          <Badge>Coordinator</Badge>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+
+
+        {/* PREVIEW */}
+        <div className="rounded-sm border bg-muted/40 p-4 mt-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">
+                Allocation Preview
               </p>
-              {selectedGroupData?.hasSubmittedPreferences && (
-                <p className="text-xs text-blue-700 mt-2">
-                  Note: This will override the group&apos;s existing mentor
-                  preferences.
+
+              {selectedGroupData && selectedMentorData ? (
+                <div className="flex items-center gap-5 mt-3">
+                  <div>
+                    <p className="font-semibold">{selectedGroupData.groupId}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {selectedGroupData.leaderName}
+                    </p>
+                  </div>
+
+                  <ArrowRight className="text-muted-foreground" />
+
+                  <div>
+                    <p className="font-semibold">{selectedMentorData.name}</p>
+                    <p className="text-sm text-muted-foreground">Mentor</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm mt-2 text-muted-foreground">
+                  Select a group and mentor to preview the allocation.
                 </p>
               )}
             </div>
-          )}
+
+            <Button
+              disabled={!selectedGroup || !selectedMentor || isSubmitting}
+              onClick={handleAllocate}
+              // size="lg"
+            >
+              {isSubmitting ? "Allocating..." : "Allocate Mentor"}
+            </Button>
+          </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={handleClose} disabled={isSubmitting}>
+        {/* <DialogFooter className="pt-2">
+          <Button
+            variant="outline"
+            onClick={handleClose}
+            disabled={isSubmitting}
+          >
             Cancel
           </Button>
-          <Button
-            onClick={handleAllocate}
-            disabled={!selectedGroup || !selectedMentor || isSubmitting}
-          >
-            {isSubmitting ? "Allocating..." : "Confirm Allocation"}
-          </Button>
-        </DialogFooter>
+        </DialogFooter> */}
       </DialogContent>
     </Dialog>
   );

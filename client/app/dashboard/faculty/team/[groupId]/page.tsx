@@ -23,6 +23,7 @@ import type {
   ReviewEvaluation,
 } from "@/types";
 import { DeleteTeamButton } from '@/components/delete-team-button';
+import { FacultyTeamPageSkeleton } from "@/components/FacultyTeamPageSkeleton";
 
 export default function FacultyTeamPage() {
   const router = useRouter();
@@ -329,15 +330,13 @@ export default function FacultyTeamPage() {
 
   if (loading || !profile || !group) {
     return (
-      <DashboardLayout title="Faculty Dashboard">
-        <div className="max-w-4xl mx-auto py-8 text-center text-gray-500">Loading team...</div>
-      </DashboardLayout>
+      <FacultyTeamPageSkeleton />
     );
   }
 
   return (
     <DashboardLayout title="Faculty Dashboard">
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="max-w-5xl mx-auto space-y-6">
         <div className="flex justify-between items-center">
           <Button variant="outline" onClick={() => router.push("/dashboard/faculty")}>
             ← Back to Dashboard
@@ -348,7 +347,7 @@ export default function FacultyTeamPage() {
           </Button>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <div className="bg-white border border-gray-200 rounded-[0.1rem] p-4">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="font-semibold text-lg">Group {group.groupId}</h2>
@@ -430,6 +429,7 @@ export default function FacultyTeamPage() {
                 messages={review1Messages}
                 currentUserId={profile.id}
                 currentUserName={profile.name}
+                group={group}
                 currentUserRole="faculty"
                 isRolledOut={review1RolledOut}
                 isUnlocked={hasApprovedTopic && hasTopicApprovalDoc}
@@ -461,6 +461,7 @@ export default function FacultyTeamPage() {
                 reviewType="review_2"
                 session={review2Session}
                 messages={review2Messages}
+                group={group}
                 currentUserId={profile.id}
                 currentUserName={profile.name}
                 currentUserRole="faculty"
@@ -486,6 +487,7 @@ export default function FacultyTeamPage() {
               currentUserId={profile.id}
               currentUserName={profile.name}
               currentUserRole="faculty"
+              group={group}
               isRolledOut={finalReviewRolledOut}
               isUnlocked={hasApprovedTopic && hasTopicApprovalDoc && review2Session?.status === "completed"}
               isLeader={false}

@@ -14,7 +14,7 @@ export class MentorAllocationsService {
     private prisma: PrismaService,
     private profilesService: ProfilesService,
     private groupsService: GroupsService,
-  ) {}
+  ) { }
 
   async getAllocationsForMentor(userId: string) {
     const profile = await this.profilesService.findByUserId(userId);
@@ -381,6 +381,118 @@ export class MentorAllocationsService {
       }
 
       return { message: "Team removed successfully" };
+    });
+  }
+
+  async getMentorAllocationStats() {
+    const [mentors, preferences, allocations] = await Promise.all([
+      this.prisma.profile.findMany({
+        where: { role: "faculty" },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          domains: true,
+        },
+      }),
+
+      this.prisma.mentorPreference.findMany({
+        select: {
+          groupId: true,
+          mentorChoice1: true,
+          mentorChoice2: true,
+          mentorChoice3: true,
+        },
+      }),
+
+      this.prisma.mentorAllocation.findMany({
+        select: {
+          mentorId: true,
+          groupId: true,
+          status: true,
+        },
+      }),
+    ]);
+
+    // Groups that have already been rejected
+    const rejectedGroupIds = new Set<string>();
+
+    // mentorId -> accepted groupIds
+    const acceptedMap = new Map<string, string[]>();
+
+    for (const allocation of allocations) {
+      if (allocation.status === "rejected") {
+        rejectedGroupIds.add(allocation.groupId);
+      }
+
+      if (allocation.status === "accepted") {
+        if (!acceptedMap.has(allocation.mentorId)) {
+          acceptedMap.set(allocation.mentorId, []);
+        }
+        acceptedMap.get(allocation.mentorId)!.push(allocation.groupId);
+      }
+    }
+
+    // mentorId -> first preference groupIds
+    const firstPreferenceMap = new Map<string, string[]>();
+
+    // mentorId -> all preference groupIds
+    const totalPreferenceMap = new Map<string, string[]>();
+
+    for (const preference of preferences) {
+      // Skip rejected groups
+      if (rejectedGroupIds.has(preference.groupId)) continue;
+
+      // First preference
+      if (preference.mentorChoice1) {
+        if (!firstPreferenceMap.has(preference.mentorChoice1)) {
+          firstPreferenceMap.set(preference.mentorChoice1, []);
+        }
+        firstPreferenceMap
+          .get(preference.mentorChoice1)!
+          .push(preference.groupId);
+      }
+
+      // All preferences
+      const choices = [
+        preference.mentorChoice1,
+        preference.mentorChoice2,
+        preference.mentorChoice3,
+      ].filter(Boolean) as string[];
+
+      for (const mentorId of choices) {
+        if (!totalPreferenceMap.has(mentorId)) {
+          totalPreferenceMap.set(mentorId, []);
+        }
+        totalPreferenceMap.get(mentorId)!.push(preference.groupId);
+      }
+    }
+
+    return mentors.map((mentor) => {
+      const firstPreferenceTeams =
+        firstPreferenceMap.get(mentor.id) ?? [];
+
+      const totalPreferenceTeams =
+        totalPreferenceMap.get(mentor.id) ?? [];
+
+      const totalRejectedCount = allocations.filter(
+        (allocation) =>
+          allocation.mentorId === mentor.id &&
+          allocation.status === "rejected"
+      ).length;
+      const acceptedTeams =
+        acceptedMap.get(mentor.id) ?? [];
+
+      return {
+        ...mentor,
+        firstPreferenceCount: firstPreferenceTeams.length,
+        totalPreferenceCount: totalPreferenceTeams.length,
+        totalRejectedCount: totalRejectedCount,
+        acceptedCount: acceptedTeams.length,
+        firstPreferenceTeams,
+        totalPreferenceTeams,
+        acceptedTeams,
+      };
     });
   }
 }

@@ -19,7 +19,7 @@ export class ReviewsService {
     private prisma: PrismaService,
     private profilesService: ProfilesService,
     private groupsService: GroupsService,
-  ) {}
+  ) { }
 
   // Rollout review for department
   async rolloutReview(userId: string, rolloutDto: RolloutReviewDto) {
@@ -51,6 +51,46 @@ export class ReviewsService {
     });
   }
 
+  // Retract review rollout
+  async removeReviewRollout(
+    userId: string,
+    reviewType: ReviewType,
+  ) {
+    const profile = await this.profilesService.findByUserId(userId);
+
+    if (!profile || profile.role !== 'super_admin') {
+      throw new ForbiddenException(
+        'Only super admins can remove review rollouts',
+      );
+    }
+
+    const rollout = await this.prisma.reviewRollout.findUnique({
+      where: {
+        department_reviewType: {
+          department: profile.department,
+          reviewType,
+        },
+      },
+    });
+
+    if (!rollout) {
+      throw new NotFoundException('Review rollout not found');
+    }
+
+    await this.prisma.reviewRollout.delete({
+      where: {
+        department_reviewType: {
+          department: profile.department,
+          reviewType,
+        },
+      },
+    });
+
+    return {
+      message: `${reviewType} rollout removed successfully`,
+    };
+  }
+
   // Get rollout status for department
   async getReviewRollout(userId: string, reviewType: ReviewType) {
     const profile = await this.profilesService.findByUserId(userId);
@@ -75,7 +115,7 @@ export class ReviewsService {
     submitDto: SubmitProgressDto,
   ) {
     const profile = await this.profilesService.findByUserId(userId);
-    if (!profile || profile.role !== 'student') {
+    if (!profile) {
       throw new ForbiddenException('Only students can submit progress');
     }
 
@@ -190,7 +230,7 @@ export class ReviewsService {
     if (!session) {
       throw new NotFoundException('Review session not found');
     }
-    console.log('session:', session);
+    // console.log('session:', session);
     return this.prisma.reviewSession.update({
       where: { id: sessionId },
       data: {

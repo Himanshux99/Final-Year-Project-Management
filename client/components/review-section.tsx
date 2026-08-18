@@ -26,6 +26,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "./ui/dialog";
+import { ProgressCardSkeleton } from "./ProgressCardSkeleton";
 import {
   ReviewSession,
   ReviewStatus,
@@ -47,8 +48,9 @@ interface ReviewSectionProps {
   isRolledOut: boolean;
   isUnlocked: boolean; // true if previous phase is complete
   isLeader?: boolean;
-  onSubmitProgress: (percentage: number, description: string) => void;
-  onUpdateProgress: (percentage: number, description: string) => void;
+  onSubmitProgress: (percentage: number, description: string) => Promise<void>;
+
+  onUpdateProgress: (percentage: number, description: string) => Promise<void>;
   onSubmitFeedback: (feedback: string) => void;
   onSendMessage: (content: string, links?: string[]) => void;
   onMarkComplete: () => void;
@@ -87,8 +89,8 @@ function encodeMemberProgress(data: MemberContribution[]) {
     .map(
       (member) =>
         `<member id="${member.id}">
-${member.implementation.trim()}
-</member>`,
+  ${member.implementation.trim()}
+  </member>`,
     )
     .join("\n\n");
 }
@@ -213,10 +215,11 @@ export function ReviewSection({
   meetLink,
   onSetMeetLink,
 }: ReviewSectionProps) {
-  
   const [showSubmitDialog, setShowSubmitDialog] = React.useState(false);
   const [showFeedbackDialog, setShowFeedbackDialog] = React.useState(false);
-  const [percentage, setPercentage] = React.useState(session?.progressPercentage || 0);
+  const [percentage, setPercentage] = React.useState(
+    session?.progressPercentage || 0,
+  );
 
   const [feedback, setFeedback] = React.useState("");
   const [showChat, setShowChat] = React.useState(true);
@@ -225,7 +228,9 @@ export function ReviewSection({
   const [submitButtonDisabled, setSubmitButtonDisabled] = React.useState(true);
   const title = getReviewTitle(reviewType);
   const reviewDescription = getReviewDescription(reviewType);
-  const statusConfig = session ? getStatusConfig(session.status) : getStatusConfig("not_started");
+  const statusConfig = session
+    ? getStatusConfig(session.status)
+    : getStatusConfig("not_started");
   const StatusIcon = statusConfig.icon;
 
   // Convert ReviewMessages to ThreadMessages
@@ -239,20 +244,31 @@ export function ReviewSection({
     createdAt: m.createdAt,
   }));
 
-  const handleSubmitProgress = () => {
+  const [showProgressSkeleton, setShowProgressSkeleton] = React.useState(false);
+
+  React.useEffect(() => {
+    if (session) {
+      setShowProgressSkeleton(false);
+    }
+  }, [session]);
+
+  const handleSubmitProgress = async () => {
     const encoded = encodeMemberProgress(
       group.members.map((member) => ({
         id: member.id,
         implementation: progress[member.id] ?? "",
       })),
     );
-    if (encoded.trim()) {
-      if (session) {
-        onUpdateProgress(percentage, encoded.trim());
-      } else {
-        onSubmitProgress(percentage, encoded.trim());
-      }
-      setShowSubmitDialog(false);
+
+    if (!encoded.trim()) return;
+
+    setShowProgressSkeleton(true);
+
+    setShowSubmitDialog(false);
+    if (session) {
+      await onUpdateProgress(percentage, encoded.trim());
+    } else {
+      await onSubmitProgress(percentage, encoded.trim());
     }
   };
 
@@ -266,11 +282,11 @@ export function ReviewSection({
 
   React.useEffect(() => {
     const allMembersFilled = group.members.every(
-      (member) => (progress[member.id] ?? "").trim().length > 0
+      (member) => (progress[member.id] ?? "").trim().length > 0,
     );
 
     setSubmitButtonDisabled(!(allMembersFilled && percentage > 0));
-  }, [progress, percentage, group]);  
+  }, [progress, percentage, group]);
 
   React.useEffect(() => {
     if (!showSubmitDialog) return;
@@ -281,9 +297,7 @@ export function ReviewSection({
       const previous = decodeMemberProgress(session.progressDescription);
 
       setProgress(
-        Object.fromEntries(
-          previous.map((m) => [m.id, m.implementation])
-        )
+        Object.fromEntries(previous.map((m) => [m.id, m.implementation])),
       );
     } else {
       setProgress({});
@@ -327,8 +341,11 @@ export function ReviewSection({
   return (
     <div className="space-y-4">
       {/* Status Banner */}
-      <div className={`rounded-lg p-4 border ${session?.status === "completed" ? "bg-green-50 border-green-200" 
-              : session?.status === "feedback_given"
+      <div
+        className={`rounded-lg p-4 border ${
+          session?.status === "completed"
+            ? "bg-green-50 border-green-200"
+            : session?.status === "feedback_given"
               ? "bg-blue-50 border-blue-200"
               : "bg-gray-50 border-gray-200"
         }`}
@@ -347,123 +364,146 @@ export function ReviewSection({
             <span className="font-medium">{title}</span>
             <Badge variant={statusConfig.variant}>{statusConfig.label}</Badge>
           </div>
-          {session && <ProgressRing percentage={session.progressPercentage} />}
+          {/* {session && <ProgressRing percentage={session.progressPercentage} />} */}
         </div>
         <p className="text-sm text-gray-600 mt-2">{reviewDescription}</p>
       </div>
 
       {/* Progress Card */}
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">Progress Update</CardTitle>
-            {currentUserRole === "student" &&
+      {showProgressSkeleton ? (
+        <ProgressCardSkeleton
+          showButton={
+            (currentUserRole === "student" &&
               isLeader &&
-              session?.status !== "completed" && (
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setPercentage(session?.progressPercentage || 0);
-                    setShowSubmitDialog(true);
-                  }}
-                >
-                  {session ? "Update Progress" : "Submit Progress"}
-                </Button>
-              )}
-            {currentUserRole === "faculty" &&
-              session &&
-              session.status === "submitted" && (
-                <Button size="sm" onClick={() => setShowFeedbackDialog(true)}>
-                  Add Feedback
-                </Button>
-              )}
-          </div>
-        </CardHeader>
-        <CardContent>
-          {!session ? (
-            <div className="text-center py-8 text-gray-500">
-              <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p>No progress submitted yet.</p>
-              {currentUserRole === "student" && isLeader && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="mt-3"
-                  onClick={() => setShowSubmitDialog(true)}
-                >
-                  Submit your progress
-                </Button>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {/* Progress Display */}
-              <div className="flex items-center gap-4">
-                <ProgressRing
-                  percentage={session.progressPercentage}
-                  size={100}
-                />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 text-sm text-gray-500 mb-1">
-                    <Percent className="h-4 w-4" />
-                    Progress: {session.progressPercentage}%
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className="bg-primary h-2 rounded-full transition-all duration-500"
-                      style={{ width: `${session.progressPercentage}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Progress Description */}
-              <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-1">
-                  What&apos;s been implemented:
-                </h4>
-                <p className="text-sm text-gray-600 whitespace-pre-wrap bg-gray-50 p-3 rounded-md">
-                  {decodeMemberProgress(session.progressDescription).map((member) => (
-                    <div key={member.id}>
-                      <strong>{group?.members.find((m) => m.id === member.id)?.profile.name}:</strong> {member.implementation}
-                    </div>
-                  ))}
-                </p>
-                <p className="text-xs text-gray-400 mt-1">
-                  Last updated: {new Date(session.submittedAt).toLocaleString()}
-                </p>
-              </div>
-
-              {/* Mentor Feedback */}
-              {session.mentorFeedback && (
-                <div className="bg-purple-50 border border-purple-100 rounded-lg p-3">
-                  <h4 className="text-sm font-medium text-purple-800 mb-1">
-                    Mentor Feedback:
-                  </h4>
-                  <p className="text-sm text-purple-700 whitespace-pre-wrap">
-                    {session.mentorFeedback}
-                  </p>
-                  {session.feedbackGivenAt && (
-                    <p className="text-xs text-purple-500 mt-1">
-                      {new Date(session.feedbackGivenAt).toLocaleString()}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Mark Complete Button */}
+              session?.status !== "completed") ||
+            (currentUserRole === "faculty" && session?.status === "submitted")
+          }
+        />
+      ) : (
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg">Progress Update</CardTitle>
+              {currentUserRole === "student" &&
+                isLeader &&
+                session?.status !== "completed" && (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setPercentage(session?.progressPercentage || 0);
+                      setShowSubmitDialog(true);
+                    }}
+                  >
+                    {session ? "Update Progress" : "Submit Progress"}
+                  </Button>
+                )}
               {currentUserRole === "faculty" &&
-                session.status === "feedback_given" && (
-                  <Button onClick={onMarkComplete} className="w-full gap-2">
-                    <CheckCircle className="h-4 w-4" />
-                    Mark Review as Complete
+                session &&
+                session.status === "submitted" && (
+                  <Button size="sm" onClick={() => setShowFeedbackDialog(true)}>
+                    Add Feedback
                   </Button>
                 )}
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardHeader>
+          <CardContent>
+            {!session ? (
+              <div className="text-center py-8 text-gray-500">
+                <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>No progress submitted yet.</p>
+                {currentUserRole === "student" && isLeader && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => setShowSubmitDialog(true)}
+                  >
+                    Submit your progress
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Progress Display */}
+                <div className="flex items-center gap-4">
+                  <ProgressRing
+                    percentage={session.progressPercentage}
+                    size={100}
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+                      <Percent className="h-4 w-4" />
+                      Progress: {session.progressPercentage}%
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-[1px] h-2">
+                      <div
+                        className="bg-primary h-2 rounded-[1px] transition-all duration-500"
+                        style={{ width: `${session.progressPercentage}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
 
+                {/* Progress Description */}
+                <div>
+                  <h4 className="text-sm font-medium text-gray-700 mb-1">
+                    What&apos;s been implemented:
+                  </h4>
+                  <div className="text-sm  whitespace-pre-wrap rounded-[2px]">
+                    {decodeMemberProgress(session.progressDescription).map(
+                      (member) => (
+                        <div
+                          key={member.id}
+                          className="mb-2 text-gray-600 bg-gray-50 p-3"
+                        >
+                          <strong>
+                            {
+                              group?.members.find((m) => m.id === member.id)
+                                ?.profile.name
+                            }{" "}
+                            :
+                          </strong>{" "}
+                          {member.implementation}
+                        </div>
+                      ),
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Last updated:{" "}
+                    {new Date(session.submittedAt).toLocaleString()}
+                  </p>
+                </div>
+
+                {/* Mentor Feedback */}
+                {session.mentorFeedback && (
+                  <div className="bg-purple-50 border border-purple-100 rounded-[2px] p-3">
+                    <h4 className="text-sm font-medium text-purple-800 mb-1">
+                      Mentor Feedback:
+                    </h4>
+                    <p className="text-sm text-purple-700 whitespace-pre-wrap">
+                      {session.mentorFeedback}
+                    </p>
+                    {session.feedbackGivenAt && (
+                      <p className="text-xs text-purple-500 mt-1">
+                        {new Date(session.feedbackGivenAt).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Mark Complete Button */}
+                {currentUserRole === "faculty" &&
+                  session.status === "feedback_given" && (
+                    <Button onClick={onMarkComplete} className="w-full gap-2">
+                      <CheckCircle className="h-4 w-4" />
+                      Mark Review as Complete
+                    </Button>
+                  )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
       {/* Discussion Thread */}
       <Card>
         <CardHeader className="pb-2">

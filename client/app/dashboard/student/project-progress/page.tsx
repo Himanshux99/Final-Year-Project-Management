@@ -68,7 +68,7 @@ export default function ProjectProgressPage() {
   const isLeader = group && profile && group.createdBy === profile.id;
   const hasApprovedTopic = topics.some((t) => t.status === "approved");
   const hasTopicApprovalDoc = !!topicApprovalDoc;
-  console.log("members", group?.members);
+  // console.log("members", group?.members);
   // Reviews require both approved topic AND uploaded topic approval form
   const canAccessReviews = hasApprovedTopic && hasTopicApprovalDoc;
   
@@ -190,6 +190,7 @@ export default function ProjectProgressPage() {
     }
 
     loadData();
+
   }, [user, profile, router, refreshKey, loadData, authLoading]);
 
   const handleRefresh = () => {
@@ -208,7 +209,7 @@ export default function ProjectProgressPage() {
     }
   };
 
-  console.log("group", group);
+  // console.log("group", group);
 
   // Attachment Handlers
   const handleUploadAttachment = async (file: File) => {
@@ -501,13 +502,6 @@ export default function ProjectProgressPage() {
 
           {/* Topic Approval */}
           <TabsContent value="topic" className="space-y-6">
-            {/* Topic Approval Form Upload */}
-            <TopicApprovalFormUpload
-              document={topicApprovalDoc}
-              isLeader={!!isLeader}
-              currentUserRole="student"
-              onDocumentChange={handleTopicApprovalDocChange}
-            />
             
             <TopicApprovalSection
               topics={topics}
@@ -525,6 +519,14 @@ export default function ProjectProgressPage() {
               onSendMessage={handleSendTopicMessage}
               meetLink={group.meetLink ?? undefined}
               onSetMeetLink={handleSetTopicMeetLink}
+            />
+
+            {/* Topic Approval Form Upload */}
+            <TopicApprovalFormUpload
+              document={topicApprovalDoc}
+              isLeader={!!isLeader}
+              currentUserRole="student"
+              onDocumentChange={handleTopicApprovalDocChange}
             />
           </TabsContent>
 

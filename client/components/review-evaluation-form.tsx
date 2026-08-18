@@ -24,7 +24,7 @@ import {
   DialogFooter,
 } from "./ui/dialog";
 import { ReviewType, ReviewEvaluation } from "@/types";
-import { EvaluationPreFillData, evaluationsApi } from "@/lib/api";
+import { EvaluationPreFillData, evaluationsApi, reviewsApi } from "@/lib/api";
 
 interface ReviewEvaluationFormProps {
   sessionId: string;
@@ -258,7 +258,7 @@ export function ReviewEvaluationForm({
           synopsisMarks: reviewType === "review_2" ? g.synopsisMarks : undefined,
         })),
       });
-
+      
       onSubmit(evaluation);
     } catch (err: any) {
       setError(err.message || "Failed to submit evaluation");

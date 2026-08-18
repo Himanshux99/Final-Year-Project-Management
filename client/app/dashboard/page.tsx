@@ -38,6 +38,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-white flex items-center justify-center">
+      <span className="ml-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-400 border-t-transparent"></span>
       <p className="text-gray-600">Loading...</p>
     </div>
   );

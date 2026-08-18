@@ -4,7 +4,7 @@
   },
   "scripts": {
     "frontend": "npm run dev --prefix client",
-    "backend": "npm run start:dev --prefix server",
+    "backend": "npm run start:debug --prefix server",
     "dev": "concurrently \"npm run frontend\" \"npm run backend\""
   
 }
