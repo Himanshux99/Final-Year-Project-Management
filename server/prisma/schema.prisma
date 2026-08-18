@@ -211,8 +211,6 @@ model ProjectTopic {
   reviewedAt  DateTime?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
-  edited Boolean     @default(false) // Indicates if the topic was edited after submission
-  editedAt DateTime? // Timestamp of the last edit
 
   group    Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
   messages TopicMessage[]
