@@ -6,6 +6,7 @@ Seed helpers to populate the development database with students, faculty and tea
 - `seedStudents.ts` — creates 8 students per department (IT, CS, ECS, ETC, BM).
 - `seedFaculty.ts` — creates faculty users from the provided list.
 - `seedTeam.ts` — creates groups from student profiles (expects 8 students per department).
+- `seedDomains.ts` — upserts the default list of project domains (also manageable by super admins from the dashboard).
 
 ## Important
 - The password for every created user/profile is: `Himanshu`

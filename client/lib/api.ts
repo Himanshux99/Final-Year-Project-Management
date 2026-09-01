@@ -7,7 +7,6 @@ import { api, setToken, removeToken } from "./api-client";
 import {
   User,
   Profile,
-  Group,
   MentorAllocationForm,
   MentorPreference,
   MentorAllocation,
@@ -312,16 +311,18 @@ export const mentorAllocationApi = {
 };
 
 // ============ PROJECT TOPICS API ============
-import { ProjectTopic, TopicMessage, TopicStatus } from "@/types";
+import { ProjectTopic, TopicMessage } from "@/types";
 
 export interface CreateTopicRequest {
   title: string;
   description: string;
+  domainId: string;
 }
 
 export interface UpdateTopicRequest {
   title?: string;
   description?: string;
+  domainId?: string;
 }
 
 export interface ReviewTopicRequest {
@@ -341,6 +342,7 @@ export const projectTopicsApi = {
       return api.uploadWithFields<ProjectTopic>("/project-topics", file, {
         title: data.title,
         description: data.description,
+        domainId: data.domainId,
       });
     }
     return api.post<ProjectTopic>("/project-topics", data);
@@ -359,6 +361,7 @@ export const projectTopicsApi = {
         {
           title: data.title ?? "",
           description: data.description ?? "",
+          ...(data.domainId ? { domainId: data.domainId } : {}),
         },
         "PATCH", // if uploadWithFields supports custom methods
       );
@@ -599,7 +602,7 @@ export const topicApprovalApi = {
 
 // ============ EVALUATIONS API ============
 
-import { ReviewEvaluation, StudentGrade, ReviewType as RT } from "@/types";
+import { ReviewEvaluation, ReviewType as RT } from "@/types";
 
 export interface StudentGradeInput {
   profileId: string;
@@ -696,3 +699,40 @@ export type MentorAllocationStats = AvailableMentor & {
 export async function getMentorAllocationStats(): Promise<MentorAllocationStats[]> {
   return api.get<MentorAllocationStats[]>(`/mentor-allocations/stats`);
 }
+
+// ============ DOMAINS API ============
+
+import { Domain } from "@/types";
+
+export interface CreateDomainRequest {
+  name: string;
+}
+
+export interface UpdateDomainRequest {
+  name?: string;
+  isActive?: boolean;
+}
+
+export const domainsApi = {
+  // Active domains only - used for topic submission dropdowns.
+  getActive: async (): Promise<Domain[]> => {
+    return api.get<Domain[]>("/domains");
+  },
+
+  // All domains including inactive ones - super admin management screen.
+  getAll: async (): Promise<Domain[]> => {
+    return api.get<Domain[]>("/domains/all");
+  },
+
+  create: async (data: CreateDomainRequest): Promise<Domain> => {
+    return api.post<Domain>("/domains", data);
+  },
+
+  update: async (id: string, data: UpdateDomainRequest): Promise<Domain> => {
+    return api.patch<Domain>(`/domains/${id}`, data);
+  },
+
+  delete: async (id: string): Promise<{ message: string }> => {
+    return api.delete<{ message: string }>(`/domains/${id}`);
+  },
+};

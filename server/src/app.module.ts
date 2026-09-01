@@ -15,6 +15,7 @@ import { SupabaseModule } from './supabase/supabase.module';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { TopicApprovalModule } from './topic-approval/topic-approval.module';
 import { EvaluationsModule } from './evaluations/evaluations.module';
+import { DomainsModule } from './domains/domains.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -38,6 +39,7 @@ import { AppController } from './app.controller';
     AttachmentsModule,
     TopicApprovalModule,
     EvaluationsModule,
+    DomainsModule,
   ],
 })
 export class AppModule {}

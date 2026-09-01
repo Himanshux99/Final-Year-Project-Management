@@ -24,20 +24,10 @@ import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/components/ui/toast";
 import {
   mentorAllocationApi,
-  groupApi,
   projectTopicsApi,
   reviewsApi,
-  topicApprovalApi,
 } from "@/lib/api";
-import {
-  MentorAllocation,
-  Profile,
-  Group,
-  TeamProgress,
-  ProjectTopic,
-  ReviewSession as ReviewSessionType,
-  ReviewType,
-} from "@/types";
+import { MentorAllocation, Profile, Group, TeamProgress } from "@/types";
 import {
   getCachedData,
   setCachedData,
@@ -45,7 +35,6 @@ import {
   CACHE_KEYS,
   CACHE_TTL,
 } from "@/lib/cache";
-import { DeleteTeamButton } from "@/components/delete-team-button";
 
 interface AllocationWithDetails extends MentorAllocation {
   group?: Group;
@@ -60,21 +49,11 @@ export default function FacultyDashboard() {
   const [allocations, setAllocations] = useState<AllocationWithDetails[]>([]);
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [teamProgress, setTeamProgress] = useState<TeamProgress[]>([]);
-  // const [selectedTeam, setSelectedTeam] = useState<TeamProgress | null>(null);
 
   // Semester filter state
   const [semesterFilter, setSemesterFilter] = useState<number | null>(null);
-
-  // // Selected team data
-  // const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
-  // const [topics, setTopics] = useState<ProjectTopic[]>([]);
-  // const [review1Session, setReview1Session] =
-  //   useState<ReviewSessionType | null>(null);
-  // const [review2Session, setReview2Session] =
-  //   useState<ReviewSessionType | null>(null);
-  // const [finalReviewSession, setFinalReviewSession] =
-  //   useState<ReviewSessionType | null>(null);
 
   useEffect(() => {
     // Wait for auth to finish loading
@@ -97,28 +76,27 @@ export default function FacultyDashboard() {
     async (forceRefresh = false) => {
       if (!profile) return;
 
-      try {
-        setInitialLoading(true);
+      if (!forceRefresh) {
+        // Show cached data immediately (if any) so we're never rendering an
+        // empty state for content the user has already seen.
+        const cachedAllocations = getCachedData<AllocationWithDetails[]>(
+          CACHE_KEYS.ALLOCATIONS,
+        );
+        const cachedTeamProgress = getCachedData<TeamProgress[]>(
+          CACHE_KEYS.TEAM_PROGRESS,
+        );
 
-        // Check cache first (unless forced refresh)
-        if (!forceRefresh) {
-          const cachedAllocations = getCachedData<AllocationWithDetails[]>(
-            CACHE_KEYS.ALLOCATIONS,
-          );
-          const cachedTeamProgress = getCachedData<TeamProgress[]>(
-            CACHE_KEYS.TEAM_PROGRESS,
-          );
-
-          if (cachedAllocations && cachedTeamProgress) {
-            setAllocations(cachedAllocations);
-            setTeamProgress(cachedTeamProgress);
-            // Show cached data immediately, but continue fetching fresh data in background.
-            setInitialLoading(false);
-          }
+        if (cachedAllocations && cachedTeamProgress) {
+          setAllocations(cachedAllocations);
+          setTeamProgress(cachedTeamProgress);
+          setInitialLoading(false);
         }
+      } else {
+        setRefreshing(true);
+      }
 
+      try {
         const mentorAllocations = await mentorAllocationApi.getForMentor();
-        // console.log("Fetched mentor allocations:", mentorAllocations);
         // Transform allocations to include flat members array
         const transformedAllocations: AllocationWithDetails[] =
           mentorAllocations.map((allocation: any) => ({
@@ -126,7 +104,6 @@ export default function FacultyDashboard() {
             members:
               allocation.group?.members?.map((m: any) => m.profile) || [],
           }));
-        // console.log("Transformed allocations:", transformedAllocations);
 
         // Sort: pending first, then by preference rank
         transformedAllocations.sort((a, b) => {
@@ -135,28 +112,22 @@ export default function FacultyDashboard() {
           return a.preferenceRank - b.preferenceRank;
         });
 
-        setAllocations(transformedAllocations);
-        setCachedData(
-          CACHE_KEYS.ALLOCATIONS,
-          transformedAllocations,
-          CACHE_TTL.MEDIUM,
-        );
-
         // Build team progress from accepted allocations
         const acceptedAllocations = transformedAllocations.filter(
           (a) => a.status === "accepted",
         );
-        const progress: TeamProgress[] = [];
 
-        // Load review rollouts once
+        // Load review rollouts once, in parallel
         let review1Rolled = false;
         let review2Rolled = false;
         let finalReviewRolled = false;
 
         try {
-          const r1 = await reviewsApi.getRollout("review_1");
-          const r2 = await reviewsApi.getRollout("review_2");
-          const fr = await reviewsApi.getRollout("final_review");
+          const [r1, r2, fr] = await Promise.all([
+            reviewsApi.getRollout("review_1"),
+            reviewsApi.getRollout("review_2"),
+            reviewsApi.getRollout("final_review"),
+          ]);
 
           review1Rolled = !!r1?.isActive;
           review2Rolled = !!r2?.isActive;
@@ -165,67 +136,85 @@ export default function FacultyDashboard() {
           console.error("Failed to load review rollouts:", error);
         }
 
-        for (const allocation of acceptedAllocations) {
-          if (!allocation.group) continue;
+        // Fetch topics + review sessions for every accepted team in parallel
+        // instead of one-team-at-a-time (was the main source of slow loads).
+        const progressResults = await Promise.all(
+          acceptedAllocations.map(async (allocation) => {
+            if (!allocation.group) return null;
+            const group = allocation.group;
 
-          // Get topics for this group
-          const topics = await projectTopicsApi
-            .getTopicsByGroupId(allocation.group.id)
-            .catch(() => []);
-          const approvedTopic = topics.find((t) => t.status === "approved");
+            const [topics, r1Session, r2Session, frSession] =
+              await Promise.all([
+                projectTopicsApi.getTopicsByGroupId(group.id).catch(() => []),
+                reviewsApi
+                  .getSessionByGroupId("review_1", group.id)
+                  .catch(() => null),
+                reviewsApi
+                  .getSessionByGroupId("review_2", group.id)
+                  .catch(() => null),
+                reviewsApi
+                  .getSessionByGroupId("final_review", group.id)
+                  .catch(() => null),
+              ]);
 
-          // Get review sessions for this group
-          const [r1Session, r2Session, frSession] = await Promise.all([
-            reviewsApi
-              .getSessionByGroupId("review_1", allocation.group.id)
-              .catch(() => null),
-            reviewsApi
-              .getSessionByGroupId("review_2", allocation.group.id)
-              .catch(() => null),
-            reviewsApi
-              .getSessionByGroupId("final_review", allocation.group.id)
-              .catch(() => null),
-          ]);
+            const approvedTopic = topics.find((t) => t.status === "approved");
 
-          progress.push({
-            groupId: allocation.group.id,
-            groupDisplayId: allocation.group.groupId,
-            mentorId: profile.id,
-            mentorName: profile.name,
-            topicApproval: {
-              status: approvedTopic
-                ? "approved"
-                : topics.length > 0
-                  ? "pending"
-                  : "pending",
-              approvedTopic: approvedTopic?.title,
-              totalTopicsSubmitted: topics.length,
-            },
-            review1: {
-              status: r1Session?.status || "not_started",
-              progressPercentage: r1Session?.progressPercentage || 0,
-              isRolledOut: review1Rolled,
-            },
-            review2: {
-              status: r2Session?.status || "not_started",
-              progressPercentage: r2Session?.progressPercentage || 0,
-              isRolledOut: review2Rolled,
-            },
-            finalReview: {
-              status: frSession?.status || "not_started",
-              progressPercentage: frSession?.progressPercentage || 0,
-              isRolledOut: finalReviewRolled,
-            },
-          });
-        }
+            const team: TeamProgress = {
+              groupId: group.id,
+              groupDisplayId: group.groupId,
+              mentorId: profile.id,
+              mentorName: profile.name,
+              topicApproval: {
+                status: approvedTopic
+                  ? "approved"
+                  : topics.length > 0
+                    ? "pending"
+                    : "pending",
+                approvedTopic: approvedTopic?.title,
+                totalTopicsSubmitted: topics.length,
+              },
+              review1: {
+                status: r1Session?.status || "not_started",
+                progressPercentage: r1Session?.progressPercentage || 0,
+                isRolledOut: review1Rolled,
+              },
+              review2: {
+                status: r2Session?.status || "not_started",
+                progressPercentage: r2Session?.progressPercentage || 0,
+                isRolledOut: review2Rolled,
+              },
+              finalReview: {
+                status: frSession?.status || "not_started",
+                progressPercentage: frSession?.progressPercentage || 0,
+                isRolledOut: finalReviewRolled,
+              },
+            };
+            return team;
+          }),
+        );
 
+        const progress = progressResults.filter(
+          (t): t is TeamProgress => t !== null,
+        );
+
+        // Apply both together so the stats/team list and the progress
+        // section update in the same render instead of one lagging behind
+        // the other (was visible as a stale-then-fresh flash on cached
+        // loads).
+        setAllocations(transformedAllocations);
         setTeamProgress(progress);
+        setCachedData(
+          CACHE_KEYS.ALLOCATIONS,
+          transformedAllocations,
+          CACHE_TTL.MEDIUM,
+        );
         setCachedData(CACHE_KEYS.TEAM_PROGRESS, progress, CACHE_TTL.MEDIUM);
-        setInitialLoading(false);
       } catch (error) {
         console.error("Failed to load allocations:", error);
         showToast("Failed to load mentor allocations", "error");
+      } finally {
         setInitialLoading(false);
+        setRefreshing(false);
       }
     },
     [profile, showToast],
@@ -234,140 +223,13 @@ export default function FacultyDashboard() {
   const handleRefresh = () => {
     invalidateCache(CACHE_KEYS.ALLOCATIONS);
     invalidateCache(CACHE_KEYS.TEAM_PROGRESS);
-    loadAllocations(true);
     showToast("Refreshing data...", "info");
+    loadAllocations(true);
   };
-
-  // const loadTeamData = useCallback(
-  //   async (teamProg: TeamProgress) => {
-  //     try {
-  //       const group = await groupApi.getById(teamProg.groupId);
-  //       setSelectedGroup(group as any); // Cast to handle type mismatch from API
-
-  //       if (group) {
-  //         // Load topics and messages via API
-  //         const [topicsData, messagesData] = await Promise.all([
-  //           projectTopicsApi.getTopicsByGroupId(group.id),
-  //           projectTopicsApi.getMessagesByGroupId(group.id),
-  //         ]);
-
-  //         console.log("Loaded team data:", {
-  //           groupId: group.id,
-  //           topicsCount: topicsData.length,
-  //           topics: topicsData,
-  //           messagesCount: messagesData.length,
-  //         });
-
-  //         setTopics(topicsData);
-  //         // setTopicMessages(messagesData);
-
-  //         // Load topic approval document
-  //         try {
-  //           const doc = await topicApprovalApi.getByGroupId(group.id);
-  //           // setTopicApprovalDoc(doc);
-  //           // setHasTopicApprovalDoc(!!doc);
-  //         } catch (error) {
-  //           console.error("Failed to check topic approval doc:", error);
-  //           // setTopicApprovalDoc(null);
-  //           // setHasTopicApprovalDoc(false);
-  //         }
-
-  //         // Load review rollouts
-  //         try {
-  //           const review1Rollout = await reviewsApi.getRollout("review_1");
-  //           const review2Rollout = await reviewsApi.getRollout("review_2");
-  //           const finalReviewRollout =
-  //             await reviewsApi.getRollout("final_review");
-
-  //           // setReview1RolledOut(!!review1Rollout?.isActive);
-  //           // setReview2RolledOut(!!review2Rollout?.isActive);
-  //           // setFinalReviewRolledOut(!!finalReviewRollout?.isActive);
-  //         } catch (error) {
-  //           console.error("Failed to load review rollouts:", error);
-  //           // setReview1RolledOut(false);
-  //           // setReview2RolledOut(false);
-  //           // setFinalReviewRolledOut(false);
-  //         }
-
-  //         // Load review sessions for this group
-  //         try {
-  //           const [r1Session, r2Session, frSession] = await Promise.all([
-  //             reviewsApi
-  //               .getSessionByGroupId("review_1", group.id)
-  //               .catch(() => null),
-  //             reviewsApi
-  //               .getSessionByGroupId("review_2", group.id)
-  //               .catch(() => null),
-  //             reviewsApi
-  //               .getSessionByGroupId("final_review", group.id)
-  //               .catch(() => null),
-  //           ]);
-
-  //           setReview1Session(r1Session);
-  //           setReview2Session(r2Session);
-  //           setFinalReviewSession(frSession);
-
-  //           // Load messages for each session
-  //           if (r1Session) {
-  //             const msgs = await reviewsApi
-  //               .getMessagesBySession(r1Session.id)
-  //               .catch(() => []);
-  //             // setReview1Messages(msgs);
-  //           } else {
-  //             // setReview1Messages([]);
-  //           }
-  //           if (r2Session) {
-  //             const msgs = await reviewsApi
-  //               .getMessagesBySession(r2Session.id)
-  //               .catch(() => []);
-  //             // setReview2Messages(msgs);
-  //           } else {
-  //             // setReview2Messages([]);
-  //           }
-  //           if (frSession) {
-  //             const msgs = await reviewsApi
-  //               .getMessagesBySession(frSession.id)
-  //               .catch(() => []);
-  //             // setFinalReviewMessages(msgs);
-  //           } else {
-  //             // setFinalReviewMessages([]);
-  //           }
-  //         } catch (error) {
-  //           console.error("Failed to load review sessions:", error);
-  //           setReview1Session(null);
-  //           setReview2Session(null);
-  //           setFinalReviewSession(null);
-  //           // setReview1Messages([]);
-  //           // setReview2Messages([]);
-  //           // setFinalReviewMessages([]);
-  //         }
-  //       }
-  //     } catch (error) {
-  //       console.error("Failed to load team data:", error);
-  //       showToast("Failed to load team data", "error");
-  //     }
-  //   },
-  //   [showToast],
-  // );
 
   const openTeamDialog = (team: TeamProgress) => {
     router.push(`/dashboard/faculty/team/${team.groupId}?tab=topic`);
   };
-
-  // const closeTeamView = () => {
-  //   setSelectedTeam(null);
-  //   setSelectedGroup(null);
-  //   setShowEmbeddedEvaluation(false);
-  //   setEvaluationSessionId("");
-  // };
-
-  // const refreshTeamData = () => {
-  //   if (selectedTeam) {
-  //     loadTeamData(selectedTeam);
-  //     loadAllocations();
-  //   }
-  //   showToast("Data refreshed", "info");
-  // };
 
   const handleAccept = async (allocationId: string) => {
     setLoading(true);
@@ -506,10 +368,10 @@ export default function FacultyDashboard() {
             variant="outline"
             onClick={handleRefresh}
             size="sm"
-            disabled={initialLoading}
+            disabled={refreshing}
           >
             <RefreshCw
-              className={`h-4 w-4 mr-2 ${initialLoading ? "animate-spin" : ""}`}
+              className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`}
             />
             Refresh
           </Button>
@@ -688,7 +550,6 @@ export default function FacultyDashboard() {
                               </p>
                             )}
                           </div>
-                          {/* <DeleteTeamButton groupId={team.groupId} /> */}
 
                           <Button
                             size="sm"
@@ -987,10 +848,6 @@ export default function FacultyDashboard() {
           </>
         )}
       </div>
-
-      {/* Team details now open on dedicated route: /dashboard/faculty/team/[groupId] */}
-
-      {/* Keep dialog state variable for compatibility, but UI now embedded in R1/R2 tabs */}
     </DashboardLayout>
   );
 }

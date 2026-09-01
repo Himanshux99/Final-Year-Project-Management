@@ -8,4 +8,8 @@ export class UpdateTopicDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsString()
+  domainId?: string;
 }

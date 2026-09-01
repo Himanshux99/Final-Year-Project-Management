@@ -73,12 +73,23 @@ export class AdminService {
               include: {
                 members: {
                   include: {
-                    profile: true,
+                    profile: {
+                      select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                        rollNumber: true,
+                        semester: true,
+                      },
+                    },
                   },
                 },
-                creator: true,
+                creator: {
+                  select: { name: true },
+                },
                 topics: {
                   orderBy: { createdAt: 'desc' },
+                  select: { title: true, status: true },
                 },
               },
             },
@@ -179,13 +190,22 @@ export class AdminService {
       include: {
         members: {
           include: {
-            profile: true,
+            profile: {
+              select: { id: true, name: true, email: true },
+            },
           },
         },
-        creator: true,
+        creator: {
+          select: { name: true },
+        },
         allocations: {
-          include: {
-            mentor: true,
+          select: {
+            mentorId: true,
+            status: true,
+            preferenceRank: true,
+            mentor: {
+              select: { name: true },
+            },
           },
         },
       },

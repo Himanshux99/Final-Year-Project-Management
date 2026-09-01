@@ -250,18 +250,10 @@ export class EvaluationsService {
           select: { id: true, name: true, email: true },
         },
         group: {
-          select: { 
-            id: true, 
-            groupId: true, 
-            teamCode: true,
+          select: {
+            id: true,
+            groupId: true,
             department: true,
-            members: {
-              include: {
-                profile: {
-                  select: { id: true, name: true, rollNumber: true, semester: true },
-                },
-              },
-            },
           },
         },
       },

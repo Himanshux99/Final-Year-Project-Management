@@ -21,24 +21,13 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
 } from "./ui/dialog";
 
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
-import { Separator } from "./ui/separator";
 
 import { AvailableMentor, UnassignedGroup } from "@/types";
-
-// type MentorAllocationStats = AvailableMentor & {
-//   firstPreferenceCount?: number;
-//   totalPreferenceCount?: number;
-//   acceptedCount?: number;
-//   firstPreferenceTeams?: string[];
-//   totalPreferenceTeams?: string[];
-//   acceptedTeams?: string[];
-// };
 
 interface ManualAllocationModalProps {
   open: boolean;
@@ -67,15 +56,11 @@ export function ManualAllocationModal({
   const [mentorStats, setMentorStats] = React.useState<MentorAllocationStats[]>(
     [],
   );
-  const [loadingMentorStats, setLoadingMentorStats] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) return;
 
-    setLoadingMentorStats(true);
-    getMentorAllocationStats()
-      .then(setMentorStats)
-      .finally(() => setLoadingMentorStats(false));
+    getMentorAllocationStats().then(setMentorStats);
   }, [open]);
 
   const mentorsWithStats = React.useMemo(
@@ -361,16 +346,6 @@ export function ManualAllocationModal({
             </Button>
           </div>
         </div>
-
-        {/* <DialogFooter className="pt-2">
-          <Button
-            variant="outline"
-            onClick={handleClose}
-            disabled={isSubmitting}
-          >
-            Cancel
-          </Button>
-        </DialogFooter> */}
       </DialogContent>
     </Dialog>
   );

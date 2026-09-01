@@ -44,6 +44,13 @@ export class ProjectTopicsService {
       throw new BadRequestException('Your group already has an approved topic');
     }
 
+    const domain = await this.prisma.domain.findUnique({
+      where: { id: createTopicDto.domainId },
+    });
+    if (!domain || !domain.isActive) {
+      throw new BadRequestException('Invalid domain selected');
+    }
+
     let storagePath: string | undefined;
     let fileUrl: string | undefined;
     if (file) {
@@ -70,6 +77,7 @@ export class ProjectTopicsService {
         groupId: group.id,
         title: createTopicDto.title,
         description: createTopicDto.description,
+        domainId: createTopicDto.domainId,
         submittedBy: profile.id,
         ...(file && fileUrl ? {
           document: {
@@ -82,7 +90,7 @@ export class ProjectTopicsService {
           },
         } : {}),
       },
-      include: { document: true },
+      include: { document: true, domain: true },
     });
     } catch (error) {
       if (storagePath) {
@@ -106,7 +114,7 @@ export class ProjectTopicsService {
     return this.prisma.projectTopic.findMany({
       where: { groupId: group.id },
       orderBy: { submittedAt: 'desc' },
-      include: { document: true },
+      include: { document: true, domain: true },
     });
   }
 
@@ -128,7 +136,7 @@ export class ProjectTopicsService {
     return this.prisma.projectTopic.findMany({
       where: { groupId },
       orderBy: { submittedAt: 'desc' },
-      include: { document: true },
+      include: { document: true, domain: true },
     });
   }
 
@@ -357,6 +365,15 @@ export class ProjectTopicsService {
       );
     }
 
+    if (updateTopicDto.domainId) {
+      const domain = await this.prisma.domain.findUnique({
+        where: { id: updateTopicDto.domainId },
+      });
+      if (!domain || !domain.isActive) {
+        throw new BadRequestException('Invalid domain selected');
+      }
+    }
+
     let documentData = {};
 
     if (file) {
@@ -400,10 +417,12 @@ export class ProjectTopicsService {
       data: {
         title: updateTopicDto.title,
         description: updateTopicDto.description,
+        ...(updateTopicDto.domainId ? { domainId: updateTopicDto.domainId } : {}),
         ...documentData,
       },
       include: {
         document: true,
+        domain: true,
       },
     });
   }

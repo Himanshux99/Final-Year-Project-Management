@@ -19,6 +19,7 @@ import {
   reviewsApi,
   attachmentsApi,
   topicApprovalApi,
+  domainsApi,
 } from "@/lib/api";
 import {
   Group,
@@ -30,6 +31,7 @@ import {
   ReviewType,
   Attachment,
   TopicApprovalDocument,
+  Domain,
 } from "@/types";
 
 export default function ProjectProgressPage() {
@@ -39,11 +41,12 @@ export default function ProjectProgressPage() {
 
   const [group, setGroup] = useState<Group | null>(null);
   const [mentor, setMentor] = useState<Profile | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Topic Approval State
   const [topics, setTopics] = useState<ProjectTopic[]>([]);
   const [topicMessages, setTopicMessages] = useState<TopicMessage[]>([]);
+  const [domains, setDomains] = useState<Domain[]>([]);
 
   // Review States
   const [review1RolledOut, setReview1RolledOut] = useState(false);
@@ -109,8 +112,55 @@ export default function ProjectProgressPage() {
         return;
       }
 
+      // Everything below is independent of everything else - fetch it all
+      // concurrently instead of one call at a time (was ~14 sequential
+      // round trips and the main source of slow loads on this page).
+      setAttachmentsLoading(true);
+      const [
+        allocations,
+        groupTopics,
+        messages,
+        review1Rollout,
+        review2Rollout,
+        finalReviewRollout,
+        r1Session,
+        r2Session,
+        frSession,
+        r1Messages,
+        r2Messages,
+        frMessages,
+        groupAttachments,
+        doc,
+        domainsList,
+      ] = await Promise.all([
+        mentorAllocationApi.getForGroup(),
+        projectTopicsApi.getMyGroupTopics(),
+        projectTopicsApi.getMyGroupMessages(),
+        reviewsApi.getRollout("review_1"),
+        reviewsApi.getRollout("review_2"),
+        reviewsApi.getRollout("final_review"),
+        reviewsApi.getMySession("review_1"),
+        reviewsApi.getMySession("review_2"),
+        reviewsApi.getMySession("final_review"),
+        reviewsApi.getMyMessages("review_1"),
+        reviewsApi.getMyMessages("review_2"),
+        reviewsApi.getMyMessages("final_review"),
+        attachmentsApi.getMyGroupAttachments().catch((error) => {
+          console.error("Error loading attachments:", error);
+          return [];
+        }),
+        topicApprovalApi.getMyDocument().catch((error) => {
+          console.error("Error loading topic approval doc:", error);
+          return null;
+        }),
+        domainsApi.getActive().catch((error) => {
+          console.error("Error loading domains:", error);
+          return [];
+        }),
+      ]);
+      setAttachmentsLoading(false);
+
       // Get mentor profile from the group's allocation data
-      const allocations = await mentorAllocationApi.getForGroup();
       const acceptedAllocation = allocations.find(
         (a) => a.status === "accepted",
       );
@@ -118,57 +168,24 @@ export default function ProjectProgressPage() {
         setMentor((acceptedAllocation as any).mentor);
       }
 
-      // Load topics and messages
-      const groupTopics = await projectTopicsApi.getMyGroupTopics();
       setTopics(groupTopics);
-
-      const messages = await projectTopicsApi.getMyGroupMessages();
       setTopicMessages(messages);
-
-      // Load review rollouts
-      const review1Rollout = await reviewsApi.getRollout("review_1");
-      const review2Rollout = await reviewsApi.getRollout("review_2");
-      const finalReviewRollout = await reviewsApi.getRollout("final_review");
+      setDomains(domainsList);
 
       setReview1RolledOut(!!review1Rollout?.isActive);
       setReview2RolledOut(!!review2Rollout?.isActive);
       setFinalReviewRolledOut(!!finalReviewRollout?.isActive);
 
-      // Load review sessions
-      const r1Session = await reviewsApi.getMySession("review_1");
-      const r2Session = await reviewsApi.getMySession("review_2");
-      const frSession = await reviewsApi.getMySession("final_review");
-
       setReview1Session(r1Session);
       setReview2Session(r2Session);
       setFinalReviewSession(frSession);
-
-      // Load review messages
-      const r1Messages = await reviewsApi.getMyMessages("review_1");
-      const r2Messages = await reviewsApi.getMyMessages("review_2");
-      const frMessages = await reviewsApi.getMyMessages("final_review");
 
       setReview1Messages(r1Messages);
       setReview2Messages(r2Messages);
       setFinalReviewMessages(frMessages);
 
-      // Load attachments
-      setAttachmentsLoading(true);
-      try {
-        const groupAttachments = await attachmentsApi.getMyGroupAttachments();
-        setAttachments(groupAttachments);
-      } catch (error) {
-        console.error("Error loading attachments:", error);
-      }
-      setAttachmentsLoading(false);
-
-      // Load topic approval document
-      try {
-        const doc = await topicApprovalApi.getMyDocument();
-        setTopicApprovalDoc(doc);
-      } catch (error) {
-        console.error("Error loading topic approval doc:", error);
-      }
+      setAttachments(groupAttachments);
+      setTopicApprovalDoc(doc);
     } catch (error) {
       console.error("Error loading data:", error);
       showToast("Failed to load data", "error");
@@ -191,11 +208,16 @@ export default function ProjectProgressPage() {
 
     loadData();
 
-  }, [user, profile, router, refreshKey, loadData, authLoading]);
+  }, [user, profile, router, loadData, authLoading]);
 
-  const handleRefresh = () => {
-    setRefreshKey((k) => k + 1);
-    showToast("Data refreshed", "info");
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    showToast("Refreshing data...", "info");
+    try {
+      await loadData();
+    } finally {
+      setRefreshing(false);
+    }
   };
   
   // Topic approval document handlers
@@ -239,10 +261,15 @@ export default function ProjectProgressPage() {
   };
 
   // Topic Approval Handlers
-  const handleSubmitTopic = async (title: string, description: string, file?: File) => {
+  const handleSubmitTopic = async (
+    title: string,
+    description: string,
+    domainId: string,
+    file?: File,
+  ) => {
     if (!group || !profile) return;
     try {
-      await projectTopicsApi.create({ title, description }, file);
+      await projectTopicsApi.create({ title, description, domainId }, file);
       showToast("Topic submitted successfully!", "success");
       await loadData();
     } catch (error: any) {
@@ -250,10 +277,16 @@ export default function ProjectProgressPage() {
     }
   };
 
-  const handleEditTopic = async (topicId: string, title: string, description: string, file?: File) => {
+  const handleEditTopic = async (
+    topicId: string,
+    title: string,
+    description: string,
+    domainId: string,
+    file?: File,
+  ) => {
     if (!group || !profile) return;
     try {
-      await projectTopicsApi.update(topicId, { title, description }, file);
+      await projectTopicsApi.update(topicId, { title, description, domainId }, file);
       await loadData();
       showToast("Topic updated successfully!", "success");
     } catch (error: any) {
@@ -446,8 +479,13 @@ export default function ProjectProgressPage() {
             <ArrowLeft className="h-4 w-4" />
             Back to Dashboard
           </Button>
-          <Button variant="outline" onClick={handleRefresh} className="gap-2">
-            <RefreshCw className="h-4 w-4" />
+          <Button
+            variant="outline"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="gap-2"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
             Refresh
           </Button>
         </div>
@@ -506,6 +544,7 @@ export default function ProjectProgressPage() {
             <TopicApprovalSection
               topics={topics}
               messages={topicMessages}
+              domains={domains}
               currentUserId={profile.id}
               currentUserName={profile.name}
               currentUserRole="student"

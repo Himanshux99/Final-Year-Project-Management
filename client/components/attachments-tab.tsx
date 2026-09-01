@@ -8,7 +8,6 @@ import {
   Download,
   Eye,
   AlertCircle,
-  CheckCircle,
   Clock,
   File,
   Image as ImageIcon,
@@ -110,9 +109,7 @@ export function AttachmentsTab({
     }
   };
 
-  const handleView = (fileUrl: string, filename: string) => {
-    // Open file in new tab for preview
-    // console.log(`Previewing file: ${filename} at ${fileUrl}`);
+  const handleView = (fileUrl: string) => {
     window.open(fileUrl, '_blank', 'noopener,noreferrer');
   };
 
@@ -257,7 +254,7 @@ export function AttachmentsTab({
                   </div>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => handleView(attachment.fileUrl, attachment.filename)}
+                      onClick={() => handleView(attachment.fileUrl)}
                       className="p-2 hover:bg-blue-100 rounded-md transition-colors"
                       title="View/Preview"
                     >

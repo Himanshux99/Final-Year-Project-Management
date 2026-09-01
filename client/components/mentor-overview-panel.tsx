@@ -7,8 +7,6 @@ import {
   Users,
   CheckCircle,
   Clock,
-  AlertCircle,
-  FileText,
   User,
   Filter,
 } from "lucide-react";

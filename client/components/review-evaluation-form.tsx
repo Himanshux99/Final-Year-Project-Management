@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import {
-  CheckCircle,
   AlertCircle,
   Save,
   User,
@@ -10,7 +9,6 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Label } from "./ui/label";
@@ -24,7 +22,7 @@ import {
   DialogFooter,
 } from "./ui/dialog";
 import { ReviewType, ReviewEvaluation } from "@/types";
-import { EvaluationPreFillData, evaluationsApi, reviewsApi } from "@/lib/api";
+import { EvaluationPreFillData, evaluationsApi } from "@/lib/api";
 
 interface ReviewEvaluationFormProps {
   sessionId: string;

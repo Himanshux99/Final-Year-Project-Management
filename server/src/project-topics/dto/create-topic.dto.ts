@@ -9,4 +9,8 @@ export class CreateTopicDto {
   @IsString()
   @IsNotEmpty()
   description: string;
+
+  @IsString()
+  @IsNotEmpty()
+  domainId: string;
 }

@@ -164,6 +164,7 @@ export const CACHE_KEYS = {
   REVIEW_ROLLOUTS: "review_rollouts",
   MY_GROUP: "my_group",
   ATTACHMENTS: "attachments",
+  ADMIN_DASHBOARD: "admin_dashboard",
 } as const;
 
 // TTL constants

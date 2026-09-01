@@ -99,6 +99,8 @@ export interface ProjectTopic {
   submittedAt: string;
   reviewedBy?: string; // mentor profile id
   reviewedAt?: string;
+  domainId?: string | null;
+  domain?: Domain | null;
   document?: TopicSubmissionDocument;
 }
 
@@ -110,6 +112,15 @@ export interface TopicSubmissionDocument {
   fileSize: number;
   mimeType: string;
   uploadedAt: string;
+}
+
+export interface Domain {
+  id: string;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  _count?: { topics: number };
 }
 
 export interface TopicMessage {

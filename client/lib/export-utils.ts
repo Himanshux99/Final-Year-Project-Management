@@ -181,7 +181,7 @@ export function generateMentorOverviewPDF(
   let yOffset = 55;
 
   // For each mentor
-  mentors.forEach((mentor, mentorIndex) => {
+  mentors.forEach((mentor) => {
     // Check if we need a new page
     if (yOffset > 250) {
       doc.addPage();

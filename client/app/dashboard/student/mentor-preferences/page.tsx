@@ -2,19 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/components/ui/toast";
-import {
-  groupApi,
-  mentorFormApi,
-  mentorPreferenceApi,
-  profileApi,
-  GroupWithMembers,
-} from "@/lib/api";
+import { groupApi, mentorFormApi, mentorPreferenceApi } from "@/lib/api";
 import { Profile } from "@/types";
 import { MentorCardSkeleton } from "@/components/ui/skeleton";
 import MentorCard from "@/components/mentor-card";
@@ -29,7 +23,6 @@ export default function MentorPreferencesPage() {
   const [loading, setLoading] = useState(false);
   const [loadingMentors, setLoadingMentors] = useState(true);
   const [formId, setFormId] = useState("");
-  const [group, setGroup] = useState<GroupWithMembers | null>(null);
 
   const loadMentorForm = useCallback(
     async (isMounted: () => boolean) => {
@@ -48,8 +41,6 @@ export default function MentorPreferencesPage() {
         }
 
         if (!isMounted()) return;
-
-        setGroup(userGroup);
 
         // Only leader can submit
         if (userGroup.createdBy !== profile.id) {

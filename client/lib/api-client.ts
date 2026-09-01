@@ -158,6 +158,6 @@ export const api = {
   fields: Record<string, any>,
   method: "POST" | "PATCH" = "POST",
 ): Promise<T> => {
-    return apiUploadWithFields<T>(endpoint, file, fields);
+    return apiUploadWithFields<T>(endpoint, file, fields, method);
   },
 };

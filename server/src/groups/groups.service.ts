@@ -236,32 +236,40 @@ export class GroupsService {
   async getGroupsWithDetails(department: Department) {
     const groups = await this.prisma.group.findMany({
       where: { department },
-      include: {
-        members: {
-          include: {
-            profile: true,
-          },
+      select: {
+        id: true,
+        groupId: true,
+        teamCode: true,
+        department: true,
+        createdBy: true,
+        isFull: true,
+        meetLink: true,
+        createdAt: true,
+        updatedAt: true,
+        creator: {
+          select: { name: true },
         },
-        creator: true,
-        preferences: true,
+        _count: {
+          select: { preferences: true },
+        },
         allocations: {
-          include: {
-            mentor: true,
+          where: { status: 'accepted' },
+          select: {
+            status: true,
+            mentor: {
+              select: { name: true },
+            },
           },
         },
       },
     });
 
     return groups.map((group) => {
-      const acceptedAllocation = group.allocations.find(
-        (a) => a.status === 'accepted',
-      );
+      const { _count, allocations, ...rest } = group;
       return {
-        ...group,
-        hasSubmittedPreferences: group.preferences.length > 0,
-        mentorAssigned: acceptedAllocation
-          ? acceptedAllocation.mentor.name
-          : null,
+        ...rest,
+        hasSubmittedPreferences: _count.preferences > 0,
+        mentorAssigned: allocations[0] ? allocations[0].mentor.name : null,
       };
     });
   }

@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Users,
   Plus,
   UserPlus,
   FileText,
@@ -14,11 +13,7 @@ import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  StatCardSkeleton,
-  CardSkeleton,
-  ListSkeleton,
-} from "@/components/ui/skeleton";
+import { CardSkeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -29,9 +24,8 @@ import {
   mentorAllocationApi,
   projectTopicsApi,
   GroupWithMembers,
-  authApi,
 } from "@/lib/api";
-import { Group, Profile } from "@/types";
+import { Profile } from "@/types";
 import {
   getCachedData,
   setCachedData,
@@ -39,6 +33,32 @@ import {
   CACHE_KEYS,
   CACHE_TTL,
 } from "@/lib/cache";
+
+interface MentorStatusInfo {
+  mentorName: string;
+  status: string;
+  currentPriority?: number;
+}
+
+interface StudentDashboardData {
+  group: GroupWithMembers | null;
+  members: Profile[];
+  mentorFormActive: boolean;
+  hasSubmittedPreferences: boolean;
+  mentorStatus: MentorStatusInfo | null;
+  mentorSelected: any[];
+  hasApprovedTopic: boolean;
+}
+
+const EMPTY_DASHBOARD_DATA: StudentDashboardData = {
+  group: null,
+  members: [],
+  mentorFormActive: false,
+  hasSubmittedPreferences: false,
+  mentorStatus: null,
+  mentorSelected: [],
+  hasApprovedTopic: false,
+};
 
 export default function StudentDashboard() {
   const router = useRouter();
@@ -51,15 +71,26 @@ export default function StudentDashboard() {
   const [showJoinForm, setShowJoinForm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [mentorFormActive, setMentorFormActive] = useState(false);
   const [hasSubmittedPreferences, setHasSubmittedPreferences] = useState(false);
-  const [mentorStatus, setMentorStatus] = useState<{
-    mentorName: string;
-    status: string;
-    currentPriority?: number;
-  } | null>(null);
+  const [mentorStatus, setMentorStatus] = useState<MentorStatusInfo | null>(null);
   const [mentorSelected, setMentorSelected] = useState<any[]>([]);
   const [hasApprovedTopic, setHasApprovedTopic] = useState(false);
+
+  // Applies a full snapshot of dashboard data in one go, so React batches it
+  // into a single render - the group card, mentor section, and progress
+  // section all appear together instead of popping in one at a time as each
+  // request resolves.
+  const applyData = useCallback((data: StudentDashboardData) => {
+    setGroup(data.group);
+    setMembers(data.members);
+    setMentorFormActive(data.mentorFormActive);
+    setHasSubmittedPreferences(data.hasSubmittedPreferences);
+    setMentorStatus(data.mentorStatus);
+    setMentorSelected(data.mentorSelected);
+    setHasApprovedTopic(data.hasApprovedTopic);
+  }, []);
 
   useEffect(() => {
     // Wait for auth to finish loading
@@ -78,146 +109,103 @@ export default function StudentDashboard() {
     loadGroupData();
   }, [user, profile, router, authLoading]);
 
-  useEffect(() => {
-    const fetchMentors = async () => {
-      if (!hasSubmittedPreferences) return;
-
-      try {
-        const allocations = await mentorAllocationApi.getForGroup();
-
-        const mentorSelectedWithNames = await Promise.all(
-          allocations.map(async (allocation) => {
-            const mentor = await profileApi.getById(allocation.mentorId);
-            // console.log("Fetched mentor:", allocation);
-            return {
-              ...allocation,
-              mentorName: mentor.name, // adjust if your API returns fullName, firstName, etc.
-            };
-          }),
-        );
-
-        setMentorSelected(mentorSelectedWithNames);
-      } catch (error) {
-        console.error("Failed to fetch mentors:", error);
-      }
-    };
-
-    fetchMentors();
-  }, [hasSubmittedPreferences]);
-
   const loadGroupData = useCallback(
     async (forceRefresh = false) => {
       if (!profile) return;
 
+      if (!forceRefresh) {
+        // Show cached data immediately (if any) so we're never rendering an
+        // empty/default state for content the user has already seen -
+        // whatever we show now will be fully consistent, and gets replaced
+        // atomically once the fresh data below lands.
+        const cached = getCachedData<StudentDashboardData>(CACHE_KEYS.MY_GROUP);
+        if (cached) {
+          applyData(cached);
+          setInitialLoading(false);
+        }
+      } else {
+        setRefreshing(true);
+      }
+
       try {
-        setInitialLoading(true);
-
-        // Check cache first (unless forced refresh)
-        if (!forceRefresh) {
-          const cachedGroup = getCachedData<GroupWithMembers>(
-            CACHE_KEYS.MY_GROUP,
-          );
-          if (cachedGroup) {
-            setGroup(cachedGroup);
-            if (cachedGroup.members) {
-              setMembers(cachedGroup.members.map((m) => m.profile));
-            }
-            setInitialLoading(false);
-            // Continue loading other data in background
-          }
-        }
-
         const userGroup = await groupApi.getMyGroup();
-        setGroup(userGroup);
-        if (userGroup) {
-          setCachedData(CACHE_KEYS.MY_GROUP, userGroup, CACHE_TTL.MEDIUM);
+
+        if (!userGroup) {
+          applyData(EMPTY_DASHBOARD_DATA);
+          invalidateCache(CACHE_KEYS.MY_GROUP);
+          return;
         }
 
-        if (userGroup) {
-          const groupMembers = userGroup.members.map((m) => m.profile);
-          setMembers(groupMembers);
-
-          // Check if mentor form is active
-          const activeForm = await mentorFormApi.getActive();
-          setMentorFormActive(!!activeForm);
-
-          // Check if preferences submitted
-          const prefResponse = await mentorPreferenceApi.hasSubmitted();
-          setHasSubmittedPreferences(prefResponse.hasSubmitted);
-
-          // Check mentor allocation status
-          const status = await mentorAllocationApi.getStatus();
-          if (status.status === "accepted" && status.mentorName) {
-            setMentorStatus({
-              mentorName: status.mentorName,
-              status: "Accepted",
-            });
-          } else if (status.status === "pending") {
-            setMentorStatus({
-              mentorName: "",
-              status: "Pending",
-              currentPriority: status.currentPriority,
-            });
-          }
-
-          // Check if topic is approved
-          try {
-            const topics = await projectTopicsApi.getMyGroupTopics();
-            setHasApprovedTopic(topics.some((t) => t.status === "approved"));
-          } catch (error) {
+        // Everything below is independent of everything else - fetch it all
+        // concurrently instead of one-at-a-time (was the main source of
+        // slow dashboard loads).
+        const [activeForm, prefResponse, status, topics] = await Promise.all([
+          mentorFormApi.getActive(),
+          mentorPreferenceApi.hasSubmitted(),
+          mentorAllocationApi.getStatus(),
+          projectTopicsApi.getMyGroupTopics().catch((error) => {
             console.error("Failed to load topics:", error);
+            return [];
+          }),
+        ]);
+
+        let mentorSelected: any[] = [];
+        if (prefResponse.hasSubmitted) {
+          try {
+            const allocations = await mentorAllocationApi.getForGroup();
+            const mentors = await profileApi.getBatch(
+              allocations.map((a) => a.mentorId),
+            );
+            const mentorsById = new Map(mentors.map((m) => [m.id, m]));
+            mentorSelected = allocations.map((allocation) => ({
+              ...allocation,
+              mentorName: mentorsById.get(allocation.mentorId)?.name ?? "",
+            }));
+          } catch (error) {
+            console.error("Failed to fetch mentors:", error);
           }
         }
 
-        const prefResponse = await mentorPreferenceApi.hasSubmitted();
-        setHasSubmittedPreferences(prefResponse.hasSubmitted);
+        const mentorStatus: MentorStatusInfo | null =
+          status.status === "accepted" && status.mentorName
+            ? { mentorName: status.mentorName, status: "Accepted" }
+            : status.status === "pending"
+              ? {
+                  mentorName: "",
+                  status: "Pending",
+                  currentPriority: status.currentPriority,
+                }
+              : null;
 
-        if (prefResponse.hasSubmitted) {
-          await fetchMentors();
-        }
+        const nextData: StudentDashboardData = {
+          group: userGroup,
+          members: userGroup.members?.map((m) => m.profile) ?? [],
+          mentorFormActive: !!activeForm,
+          hasSubmittedPreferences: prefResponse.hasSubmitted,
+          hasApprovedTopic: topics.some((t) => t.status === "approved"),
+          mentorStatus,
+          mentorSelected,
+        };
 
-        setInitialLoading(false);
+        // Apply everything together so the group card, mentor section, and
+        // progress section all appear/update in the same render instead of
+        // popping in one at a time.
+        applyData(nextData);
+        setCachedData(CACHE_KEYS.MY_GROUP, nextData, CACHE_TTL.MEDIUM);
       } catch (error: any) {
         console.error("Failed to load group data:", error);
+      } finally {
         setInitialLoading(false);
+        setRefreshing(false);
       }
     },
-    [profile],
+    [profile, applyData],
   );
-
-  
-
-  const fetchMentors = useCallback(async () => {
-    if (!hasSubmittedPreferences) return;
-
-    try {
-      const allocations = await mentorAllocationApi.getForGroup();
-
-      const mentorSelectedWithNames = await Promise.all(
-        allocations.map(async (allocation) => {
-          const mentor = await profileApi.getById(allocation.mentorId);
-
-          return {
-            ...allocation,
-            mentorName: mentor.name,
-          };
-        }),
-      );
-
-      setMentorSelected(mentorSelectedWithNames);
-    } catch (error) {
-      console.error("Failed to fetch mentors:", error);
-    }
-  }, [hasSubmittedPreferences]);              
-
-  useEffect(() => {
-  fetchMentors();
-}, [fetchMentors]);
 
   const handleRefresh = () => {
     invalidateCache(CACHE_KEYS.MY_GROUP);
-    loadGroupData(true);
     showToast("Refreshing data...", "info");
+    loadGroupData(true);
   };
 
   const handleCreateGroup = async () => {
@@ -268,29 +256,22 @@ export default function StudentDashboard() {
               variant="outline"
               onClick={handleRefresh}
               size="sm"
-              disabled={initialLoading}
+              disabled={refreshing}
             >
               <RefreshCw
-                className={`h-4 w-4 mr-2 ${initialLoading ? "animate-spin" : ""}`}
+                className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`}
               />
               Refresh
             </Button>
           </div>
         )}
 
-        {/* Loading Skeleton */}
-        {initialLoading && !group ? (
+        {/* Loading Skeleton - only shown before we have any data at all;
+            once loaded, group/members/mentor state update together so
+            there's no in-between state to render a skeleton for. */}
+        {initialLoading ? (
           <div className="space-y-6">
             <CardSkeleton className="h-48" />
-          </div>
-        ) : initialLoading && group ? (
-          <div className="space-y-6">
-            <CardSkeleton className="h-32" />
-            <div className="grid md:grid-cols-2 gap-4">
-              <StatCardSkeleton />
-              <StatCardSkeleton />
-            </div>
-            <ListSkeleton items={2} />
           </div>
         ) : !group ? (
           <>

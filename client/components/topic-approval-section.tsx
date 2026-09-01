@@ -27,21 +27,29 @@ import {
   DialogDescription,
   DialogFooter,
 } from "./ui/dialog";
-import { ProjectTopic, TopicStatus, TopicMessage } from "@/types";
+import { ProjectTopic, TopicStatus, TopicMessage, Domain } from "@/types";
+import { Select } from "./ui/select";
 
 interface TopicApprovalSectionProps {
   topics: ProjectTopic[];
   messages: TopicMessage[];
+  domains: Domain[];
   currentUserId: string;
   currentUserName: string;
   currentUserRole: "student" | "faculty";
   groupId: string;
   isLeader?: boolean;
-  onSubmitTopic: (title: string, description: string, file?: File) => void;
+  onSubmitTopic: (
+    title: string,
+    description: string,
+    domainId: string,
+    file?: File,
+  ) => void;
   onUpdateTopic: (
     topicId: string,
     title: string,
     description: string,
+    domainId: string,
     file?: File,
   ) => void;
   onApproveTopic: (topicId: string) => void;
@@ -96,10 +104,8 @@ function getStatusConfig(status: TopicStatus) {
 export function TopicApprovalSection({
   topics,
   messages,
-  currentUserId,
-  currentUserName,
+  domains,
   currentUserRole,
-  groupId,
   isLeader = false,
   onSubmitTopic,
   onUpdateTopic,
@@ -114,6 +120,7 @@ export function TopicApprovalSection({
   const [showAddTopic, setShowAddTopic] = React.useState(false);
   const [newTopicTitle, setNewTopicTitle] = React.useState("");
   const [newTopicDescription, setNewTopicDescription] = React.useState("");
+  const [newTopicDomainId, setNewTopicDomainId] = React.useState("");
   const [newTopicFile, setNewTopicFile] = React.useState<File | null>(null);
   const [expandedTopic, setExpandedTopic] = React.useState<string | null>(null);
   const [showRevisionDialog, setShowRevisionDialog] = React.useState(false);
@@ -126,9 +133,6 @@ export function TopicApprovalSection({
   );
 
   const approvedTopic = topics.find((t) => t.status === "approved");
-  const pendingTopics = topics.filter(
-    (t) => t.status === "submitted" || t.status === "under_review",
-  );
   const canAddMoreTopics =
     currentUserRole === "student" &&
     !approvedTopic &&
@@ -146,19 +150,21 @@ export function TopicApprovalSection({
   }));
 
   const handleSubmitTopic = () => {
-    if (newTopicTitle.trim() && newTopicDescription.trim()) {
+    if (newTopicTitle.trim() && newTopicDescription.trim() && newTopicDomainId) {
       if (editingTopic) {
         // console.log("Updating topic:", editingTopic.title, newTopicDescription, newTopicFile);
         onUpdateTopic(
           editingTopic.id,
           newTopicTitle.trim(),
           newTopicDescription.trim(),
+          newTopicDomainId,
           newTopicFile || undefined,
         );
       } else {
         onSubmitTopic(
           newTopicTitle.trim(),
           newTopicDescription.trim(),
+          newTopicDomainId,
           newTopicFile || undefined,
         );
       }
@@ -166,6 +172,7 @@ export function TopicApprovalSection({
       setEditingTopic(null);
       setNewTopicTitle("");
       setNewTopicDescription("");
+      setNewTopicDomainId("");
       setNewTopicFile(null);
       setShowAddTopic(false);
     }
@@ -176,6 +183,7 @@ export function TopicApprovalSection({
 
     setNewTopicTitle(topic.title);
     setNewTopicDescription(topic.description);
+    setNewTopicDomainId(topic.domainId || "");
     setNewTopicFile(null);
 
     setShowAddTopic(true);
@@ -216,6 +224,11 @@ export function TopicApprovalSection({
           </div>
           <p className="mt-1 text-green-700 font-semibold">
             {approvedTopic.title}
+            {approvedTopic.domain && (
+              <span className="ml-2 text-xs font-normal text-green-700/80">
+                ({approvedTopic.domain.name})
+              </span>
+            )}
           </p>
           <p className="mt-1 text-sm text-green-600">
             {approvedTopic.description}
@@ -312,6 +325,11 @@ export function TopicApprovalSection({
                             <h4 className="font-medium text-gray-900 truncate">
                               {topic.title}
                             </h4>
+                            {topic.domain && (
+                              <Badge variant="outline" className="shrink-0">
+                                {topic.domain.name}
+                              </Badge>
+                            )}
                           </div>
                           {!isExpanded && (
                             <p className="text-sm text-gray-600 truncate mt-1">
@@ -490,6 +508,30 @@ export function TopicApprovalSection({
             </div>
             <div>
               <label className="text-sm font-medium text-gray-700">
+                Domain
+              </label>
+              <Select
+                value={newTopicDomainId}
+                onChange={(e) => setNewTopicDomainId(e.target.value)}
+                className="mt-1"
+              >
+                <option value="" disabled>
+                  Select a domain
+                </option>
+                {domains.map((domain) => (
+                  <option key={domain.id} value={domain.id}>
+                    {domain.name}
+                  </option>
+                ))}
+              </Select>
+              {domains.length === 0 && (
+                <p className="mt-1 text-xs text-amber-600">
+                  No domains available yet. Ask your admin to add some.
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-700">
                 Supporting document{" "}
                 <span className="text-gray-500">(optional)</span>
               </label>
@@ -521,7 +563,11 @@ export function TopicApprovalSection({
             </Button>
             <Button
               onClick={handleSubmitTopic}
-              disabled={!newTopicTitle.trim() || !newTopicDescription.trim()}
+              disabled={
+                !newTopicTitle.trim() ||
+                !newTopicDescription.trim() ||
+                !newTopicDomainId
+              }
             >
               {editingTopic ? "Update Topic" : "Submit Topic"}
             </Button>

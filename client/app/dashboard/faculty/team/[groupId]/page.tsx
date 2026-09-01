@@ -12,7 +12,7 @@ import { TopicApprovalFormUpload } from "@/components/topic-approval-form-upload
 import { ReviewEvaluationForm } from "@/components/review-evaluation-form";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/components/ui/toast";
-import { evaluationsApi, groupApi, projectTopicsApi, reviewsApi, topicApprovalApi } from "@/lib/api";
+import { evaluationsApi, groupApi, projectTopicsApi, reviewsApi, topicApprovalApi, domainsApi } from "@/lib/api";
 import type {
   Group,
   ProjectTopic,
@@ -21,8 +21,8 @@ import type {
   ReviewSession as ReviewSessionType,
   ReviewType,
   ReviewEvaluation,
+  Domain,
 } from "@/types";
-import { DeleteTeamButton } from '@/components/delete-team-button';
 import { FacultyTeamPageSkeleton } from "@/components/FacultyTeamPageSkeleton";
 
 export default function FacultyTeamPage() {
@@ -35,6 +35,7 @@ export default function FacultyTeamPage() {
   const [group, setGroup] = useState<Group | null>(null);
   const [topics, setTopics] = useState<ProjectTopic[]>([]);
   const [topicMessages, setTopicMessages] = useState<TopicMessage[]>([]);
+  const [domains, setDomains] = useState<Domain[]>([]);
   const [topicApprovalDoc, setTopicApprovalDoc] = useState<any | null>(null);
   const [review1Session, setReview1Session] = useState<ReviewSessionType | null>(null);
   const [review2Session, setReview2Session] = useState<ReviewSessionType | null>(null);
@@ -62,59 +63,66 @@ export default function FacultyTeamPage() {
     if (!groupId) return;
     setLoading(true);
     try {
-      const groupData = await groupApi.getById(groupId);
-      setGroup(groupData as any);
-
-      const [topicsData, messagesData] = await Promise.all([
+      // All of these only depend on groupId, not on each other - fetch them
+      // concurrently instead of in ~6 sequential stages (was the main
+      // source of slow loads on this page).
+      const [
+        groupData,
+        topicsData,
+        messagesData,
+        evaluations,
+        doc,
+        r1Rollout,
+        r2Rollout,
+        frRollout,
+        r1Session,
+        r2Session,
+        frSession,
+        domainsList,
+      ] = await Promise.all([
+        groupApi.getById(groupId),
         projectTopicsApi.getTopicsByGroupId(groupId),
         projectTopicsApi.getMessagesByGroupId(groupId),
-      ]);
-      setTopics(topicsData);
-      setTopicMessages(messagesData);
-
-      const evaluations = await evaluationsApi.getByGroupId(groupId).catch(() => []);
-      setGroupEvaluations(evaluations);
-
-      try {
-        const doc = await topicApprovalApi.getByGroupId(groupId);
-        setTopicApprovalDoc(doc);
-      } catch {
-        setTopicApprovalDoc(null);
-      }
-
-      const [r1Rollout, r2Rollout, frRollout] = await Promise.all([
+        evaluationsApi.getByGroupId(groupId).catch(() => []),
+        topicApprovalApi.getByGroupId(groupId).catch(() => null),
         reviewsApi.getRollout("review_1").catch(() => null),
         reviewsApi.getRollout("review_2").catch(() => null),
         reviewsApi.getRollout("final_review").catch(() => null),
-      ]);
-      setReview1RolledOut(!!r1Rollout?.isActive);
-      setReview2RolledOut(!!r2Rollout?.isActive);
-      setFinalReviewRolledOut(!!frRollout?.isActive);
-
-      const [r1Session, r2Session, frSession] = await Promise.all([
         reviewsApi.getSessionByGroupId("review_1", groupId).catch(() => null),
         reviewsApi.getSessionByGroupId("review_2", groupId).catch(() => null),
         reviewsApi.getSessionByGroupId("final_review", groupId).catch(() => null),
+        domainsApi.getActive().catch(() => []),
       ]);
+
+      setGroup(groupData as any);
+      setTopics(topicsData);
+      setTopicMessages(messagesData);
+      setDomains(domainsList);
+      setGroupEvaluations(evaluations);
+      setTopicApprovalDoc(doc);
+      setReview1RolledOut(!!r1Rollout?.isActive);
+      setReview2RolledOut(!!r2Rollout?.isActive);
+      setFinalReviewRolledOut(!!frRollout?.isActive);
       setReview1Session(r1Session);
       setReview2Session(r2Session);
       setFinalReviewSession(frSession);
 
-      if (r1Session?.id) {
-        setReview1Messages(await reviewsApi.getMessagesBySession(r1Session.id).catch(() => []));
-      } else {
-        setReview1Messages([]);
-      }
-      if (r2Session?.id) {
-        setReview2Messages(await reviewsApi.getMessagesBySession(r2Session.id).catch(() => []));
-      } else {
-        setReview2Messages([]);
-      }
-      if (frSession?.id) {
-        setFinalReviewMessages(await reviewsApi.getMessagesBySession(frSession.id).catch(() => []));
-      } else {
-        setFinalReviewMessages([]);
-      }
+      // These need the session ids resolved above, but are independent of
+      // each other.
+      const [r1Messages, r2Messages, frMessages] = await Promise.all([
+        r1Session?.id
+          ? reviewsApi.getMessagesBySession(r1Session.id).catch(() => [])
+          : Promise.resolve([]),
+        r2Session?.id
+          ? reviewsApi.getMessagesBySession(r2Session.id).catch(() => [])
+          : Promise.resolve([]),
+        frSession?.id
+          ? reviewsApi.getMessagesBySession(frSession.id).catch(() => [])
+          : Promise.resolve([]),
+      ]);
+      setReview1Messages(r1Messages);
+      setReview2Messages(r2Messages);
+      setFinalReviewMessages(frMessages);
     } catch (error) {
       console.error("Failed to load team data:", error);
       showToast("Failed to load team data", "error");
@@ -136,9 +144,14 @@ export default function FacultyTeamPage() {
     loadTeamData();
   }, [authLoading, user, profile, router, loadTeamData]);
 
-  const handleSubmitTopic = async (title: string, description: string, file?: File) => {
+  const handleSubmitTopic = async (
+    title: string,
+    description: string,
+    domainId: string,
+    file?: File,
+  ) => {
     try {
-      await projectTopicsApi.create({ title, description }, file);
+      await projectTopicsApi.create({ title, description, domainId }, file);
       showToast("Topic submitted!", "success");
       await loadTeamData();
     } catch (error: any) {
@@ -166,7 +179,13 @@ export default function FacultyTeamPage() {
     }
   };
 
-  const handleEditTopic = async (topicId: string, title: string, description: string, file?: File) => { return;}
+  const handleEditTopic = async (
+    topicId: string,
+    title: string,
+    description: string,
+    domainId: string,
+    file?: File,
+  ) => { return; }
   const handleRequestRevision = async (topicId: string, feedback: string) => {
     try {
       await projectTopicsApi.requestRevision(topicId, feedback);
@@ -396,6 +415,7 @@ export default function FacultyTeamPage() {
             <TopicApprovalSection
               topics={topics}
               messages={topicMessages}
+              domains={domains}
               currentUserId={profile.id}
               currentUserName={profile.name}
               currentUserRole="faculty"

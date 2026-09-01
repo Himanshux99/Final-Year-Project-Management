@@ -32,7 +32,6 @@ import {
   ReviewStatus,
   ReviewMessage,
   ReviewType,
-  Department,
   Group,
 } from "@/types";
 import { Label } from "./ui/label";
@@ -201,8 +200,6 @@ export function ReviewSection({
   session,
   messages,
   group,
-  currentUserId,
-  currentUserName,
   currentUserRole,
   isRolledOut,
   isUnlocked,

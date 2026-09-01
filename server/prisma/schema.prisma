@@ -204,6 +204,7 @@ model ProjectTopic {
   groupId     String
   title       String
   description String      @db.Text
+  domainId    String?
   status      TopicStatus @default(submitted)
   submittedBy String
   submittedAt DateTime    @default(now())
@@ -213,9 +214,23 @@ model ProjectTopic {
   updatedAt   DateTime    @updatedAt
 
   group    Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  domain   Domain?        @relation(fields: [domainId], references: [id])
   messages TopicMessage[]
   document TopicSubmissionDocument?
   @@index([groupId])
+  @@index([domainId])
+}
+
+// Project domains (e.g. AI/ML, Web Dev) - managed by super admin, selected
+// by students on topic submission, visible to faculty for review.
+model Domain {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  topics ProjectTopic[]
 }
 
 // A topic submission may include one supporting document.

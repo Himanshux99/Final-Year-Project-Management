@@ -12,17 +12,18 @@ import {
   Download,
   UserPlus,
   RefreshCw,
+  Plus,
+  Trash2,
+  Pencil,
+  Tags,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import {
-  StatCardSkeleton,
-  MentorCardSkeleton,
-  Skeleton,
-} from "@/components/ui/skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -33,6 +34,7 @@ import {
   projectTopicsApi,
   adminApi,
   evaluationsApi,
+  domainsApi,
 } from "@/lib/api";
 import {
   MentorAllocationForm,
@@ -43,6 +45,7 @@ import {
   UnassignedGroup,
   AvailableMentor,
   ReviewEvaluation,
+  Domain,
 } from "@/types";
 import { MentorOverviewPanel } from "@/components/mentor-overview-panel";
 import { ManualAllocationModal } from "@/components/manual-allocation-modal";
@@ -58,6 +61,17 @@ import {
   CACHE_TTL,
 } from "@/lib/cache";
 
+interface AdminDashboardData {
+  activeForm: MentorAllocationForm | null;
+  selectedMentors: string[];
+  facultyList: Profile[];
+  groups: any[];
+  reviewRollouts: ReviewRollout[];
+  mentorOverview: MentorOverview[];
+  unassignedGroups: UnassignedGroup[];
+  availableMentorsForAlloc: AvailableMentor[];
+}
+
 export default function AdminDashboard() {
   const router = useRouter();
   const { user, profile, loading: authLoading } = useAuth();
@@ -70,6 +84,7 @@ export default function AdminDashboard() {
   const [selectedMentors, setSelectedMentors] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [groups, setGroups] = useState<any[]>([]);
   const [reviewRollouts, setReviewRollouts] = useState<ReviewRollout[]>([]);
 
@@ -85,12 +100,35 @@ export default function AdminDashboard() {
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
 
+  // Applies a full snapshot of dashboard data in one go, so React batches it
+  // into a single render - the form, stats, rollout badges, and mentor
+  // overview all appear/update together instead of popping in one at a time
+  // as each request resolves.
+  const applyData = useCallback((data: AdminDashboardData) => {
+    setActiveForm(data.activeForm);
+    setSelectedMentors(data.selectedMentors);
+    setFacultyList(data.facultyList);
+    setGroups(data.groups);
+    setReviewRollouts(data.reviewRollouts);
+    setMentorOverview(data.mentorOverview);
+    setUnassignedGroups(data.unassignedGroups);
+    setAvailableMentorsForAlloc(data.availableMentorsForAlloc);
+  }, []);
+
   // Semester filter state
   const [semesterFilter, setSemesterFilter] = useState<number | null>(null);
 
   // Evaluations state
   const [evaluations, setEvaluations] = useState<ReviewEvaluation[]>([]);
   const [evaluationsLoading, setEvaluationsLoading] = useState(false);
+
+  // Domains state
+  const [domains, setDomains] = useState<Domain[]>([]);
+  const [domainsLoading, setDomainsLoading] = useState(false);
+  const [newDomainName, setNewDomainName] = useState("");
+  const [addingDomain, setAddingDomain] = useState(false);
+  const [editingDomainId, setEditingDomainId] = useState<string | null>(null);
+  const [editingDomainName, setEditingDomainName] = useState("");
 
   useEffect(() => {
     // Wait for auth to finish loading
@@ -113,53 +151,60 @@ export default function AdminDashboard() {
     async (forceRefresh = false) => {
       if (!profile) return;
 
-      try {
-        setInitialLoading(true);
-
-        // Check cache first (unless forced refresh)
-        if (!forceRefresh) {
-          const cachedMentorOverview = getCachedData<MentorOverview[]>(
-            CACHE_KEYS.MENTOR_OVERVIEW,
-          );
-          const cachedGroups = getCachedData<any[]>(CACHE_KEYS.GROUPS);
-          const cachedFacultyList = getCachedData<Profile[]>(
-            CACHE_KEYS.FACULTY_LIST,
-          );
-
-          if (cachedMentorOverview && cachedGroups && cachedFacultyList) {
-            setMentorOverview(cachedMentorOverview);
-            setGroups(cachedGroups);
-            setFacultyList(cachedFacultyList);
-            // Show cache immediately, but still fetch fresh data so rollout status is current.
-            setInitialLoading(false);
-          }
-        }
-
-        // Load active form
-        const form = await mentorFormApi.getActiveByDepartment(
-          profile.department,
+      if (!forceRefresh) {
+        // Show cached data immediately (if any) so we're never rendering an
+        // empty/default state for content the user has already seen - the
+        // form, rollout badges, and stats all come from one snapshot, so
+        // what we show now will be fully consistent.
+        const cached = getCachedData<AdminDashboardData>(
+          CACHE_KEYS.ADMIN_DASHBOARD,
         );
-        setActiveForm(form as any); // Cast to avoid type mismatch with extended type
-
-        // Load faculty list
-        const faculty = await profileApi.getFacultyByDepartment(
-          profile.department,
-        );
-        setFacultyList(faculty);
-        setCachedData(CACHE_KEYS.FACULTY_LIST, faculty, CACHE_TTL.LONG);
-
-        if (form) {
-          setSelectedMentors(
-            form.availableMentors.map((m: any) => m.mentorId ?? m.id),
-          );
+        if (cached) {
+          applyData(cached);
+          setInitialLoading(false);
         } else {
-          setSelectedMentors([]);
+          // Nothing to show yet for the mentor panel specifically.
+          setOverviewLoading(true);
         }
+      } else {
+        setRefreshing(true);
+      }
 
-        // Load groups by department with mentor details
-        const deptGroups = await groupApi.getWithDetails(profile.department);
+      try {
+        // All of these are independent of one another - fire them together
+        // instead of one-at-a-time (was the main source of slow dashboard
+        // loads).
+        const [
+          form,
+          faculty,
+          deptGroups,
+          rolloutSettled,
+          overview,
+          allocationData,
+        ] = await Promise.all([
+          mentorFormApi.getActiveByDepartment(profile.department),
+          profileApi.getFacultyByDepartment(profile.department),
+          groupApi.getWithDetails(profile.department),
+          Promise.allSettled([
+            reviewsApi.getRollout("review_1"),
+            reviewsApi.getRollout("review_2"),
+            reviewsApi.getRollout("final_review"),
+          ]),
+          adminApi.getMentorOverview().catch((error) => {
+            console.error("Error loading mentor overview:", error);
+            return [] as MentorOverview[];
+          }),
+          Promise.all([
+            adminApi.getUnassignedGroups(),
+            adminApi.getAvailableMentors(),
+          ]).catch((error) => {
+            console.error("Error loading allocation data:", error);
+            return [[], []] as [UnassignedGroup[], AvailableMentor[]];
+          }),
+        ]);
 
-        // Load topic data for each group
+        // Annotate each group with topic-approval info - independent per
+        // group, so fetch them all in parallel too.
         const groupsWithDetails = await Promise.all(
           deptGroups.map(async (group) => {
             let topicApproved = false;
@@ -174,20 +219,12 @@ export default function AdminDashboard() {
                 topicApproved = true;
                 topicTitle = approvedTopic.title;
               }
-              // const groupReviews = reviewSessions.filter(
-              //   (r) => r.groupId === group.id
-              // );
-
-              // const review1 = groupReviews.find((r) => r.reviewType === "review1");
-              // const review2 = groupReviews.find((r) => r.reviewType === "review2");
-              // const finalReview = groupReviews.find((r) => r.reviewType === "final");
             } catch (error) {
               console.error(
                 `Failed to load topics for group ${group.id}:`,
                 error,
               );
             }
-            // console.log(`Group:`, group);
             return {
               ...group,
               leaderName: group.creator?.name,
@@ -204,56 +241,44 @@ export default function AdminDashboard() {
             };
           }),
         );
-        // console.log("Loaded groups with details:", groupsWithDetails);
-        setGroups(groupsWithDetails);
-        setCachedData(CACHE_KEYS.GROUPS, groupsWithDetails, CACHE_TTL.MEDIUM);
 
-        // Load review rollouts
-        const rollouts: ReviewRollout[] = [];
-        try {
-          const r1 = await reviewsApi.getRollout("review_1");
-          if (r1) rollouts.push(r1);
-        } catch (error) {}
-        try {
-          const r2 = await reviewsApi.getRollout("review_2");
-          if (r2) rollouts.push(r2);
-        } catch (error) {}
-        try {
-          const fr = await reviewsApi.getRollout("final_review");
-          if (fr) rollouts.push(fr);
-        } catch (error) {}
+        const rollouts = rolloutSettled
+          .filter(
+            (r): r is PromiseFulfilledResult<ReviewRollout | null> =>
+              r.status === "fulfilled",
+          )
+          .map((r) => r.value)
+          .filter((r): r is ReviewRollout => !!r);
 
-        setReviewRollouts(rollouts);
+        const [unassigned, mentorsForAlloc] = allocationData;
 
-        // Load mentor overview data
-        setOverviewLoading(true);
-        try {
-          const overview = await adminApi.getMentorOverview();
-          setMentorOverview(overview);
-          setCachedData(CACHE_KEYS.MENTOR_OVERVIEW, overview, CACHE_TTL.MEDIUM);
-        } catch (error) {
-          console.error("Error loading mentor overview:", error);
-        }
+        const nextData: AdminDashboardData = {
+          activeForm: form as any, // Cast to avoid type mismatch with extended type
+          selectedMentors: form
+            ? form.availableMentors.map((m: any) => m.mentorId ?? m.id)
+            : [],
+          facultyList: faculty,
+          groups: groupsWithDetails,
+          reviewRollouts: rollouts,
+          mentorOverview: overview,
+          unassignedGroups: unassigned,
+          availableMentorsForAlloc: mentorsForAlloc,
+        };
 
-        // Load unassigned groups and available mentors for manual allocation
-        try {
-          const [unassigned, mentorsForAlloc] = await Promise.all([
-            adminApi.getUnassignedGroups(),
-            adminApi.getAvailableMentors(),
-          ]);
-          setUnassignedGroups(unassigned);
-          setAvailableMentorsForAlloc(mentorsForAlloc);
-        } catch (error) {
-          console.error("Error loading allocation data:", error);
-        }
-        setOverviewLoading(false);
-        setInitialLoading(false);
+        // Apply everything together so the form, stats, rollout badges, and
+        // mentor overview all appear/update in the same render instead of
+        // popping in one at a time.
+        applyData(nextData);
+        setCachedData(CACHE_KEYS.ADMIN_DASHBOARD, nextData, CACHE_TTL.MEDIUM);
       } catch (error: any) {
         console.error("Error loading admin data:", error);
+      } finally {
         setInitialLoading(false);
+        setOverviewLoading(false);
+        setRefreshing(false);
       }
     },
-    [profile],
+    [profile, applyData],
   );
 
   const loadEvaluations = useCallback(async () => {
@@ -276,25 +301,100 @@ export default function AdminDashboard() {
     }
   }, [activeTab, evaluations.length, loadEvaluations]);
 
+  const loadDomains = useCallback(async () => {
+    try {
+      setDomainsLoading(true);
+      const allDomains = await domainsApi.getAll();
+      setDomains(allDomains);
+    } catch (error) {
+      console.error("Failed to load domains:", error);
+      showToast("Failed to load domains", "error");
+    } finally {
+      setDomainsLoading(false);
+    }
+  }, [showToast]);
+
+  // Load domains when the domains tab is active
+  useEffect(() => {
+    if (activeTab === "domains" && domains.length === 0) {
+      loadDomains();
+    }
+  }, [activeTab, domains.length, loadDomains]);
+
+  const handleAddDomain = async () => {
+    if (!newDomainName.trim()) return;
+    setAddingDomain(true);
+    try {
+      await domainsApi.create({ name: newDomainName.trim() });
+      setNewDomainName("");
+      showToast("Domain added!", "success");
+      await loadDomains();
+    } catch (error: any) {
+      showToast(error.message || "Failed to add domain", "error");
+    } finally {
+      setAddingDomain(false);
+    }
+  };
+
+  const handleStartEditDomain = (domain: Domain) => {
+    setEditingDomainId(domain.id);
+    setEditingDomainName(domain.name);
+  };
+
+  const handleSaveEditDomain = async () => {
+    if (!editingDomainId || !editingDomainName.trim()) return;
+    try {
+      await domainsApi.update(editingDomainId, { name: editingDomainName.trim() });
+      setEditingDomainId(null);
+      setEditingDomainName("");
+      showToast("Domain updated!", "success");
+      await loadDomains();
+    } catch (error: any) {
+      showToast(error.message || "Failed to update domain", "error");
+    }
+  };
+
+  const handleToggleDomainActive = async (domain: Domain) => {
+    try {
+      await domainsApi.update(domain.id, { isActive: !domain.isActive });
+      showToast(
+        domain.isActive ? "Domain deactivated" : "Domain activated",
+        "success",
+      );
+      await loadDomains();
+    } catch (error: any) {
+      showToast(error.message || "Failed to update domain", "error");
+    }
+  };
+
+  const handleDeleteDomain = async (domain: Domain) => {
+    try {
+      await domainsApi.delete(domain.id);
+      showToast("Domain deleted", "success");
+      await loadDomains();
+    } catch (error: any) {
+      showToast(error.message || "Failed to delete domain", "error");
+    }
+  };
+
   const handleRefresh = () => {
     // Clear cache and reload
-    invalidateCache(CACHE_KEYS.MENTOR_OVERVIEW);
-    invalidateCache(CACHE_KEYS.GROUPS);
-    invalidateCache(CACHE_KEYS.FACULTY_LIST);
+    invalidateCache(CACHE_KEYS.ADMIN_DASHBOARD);
+    showToast("Refreshing data...", "info");
     loadData(true);
     if (activeTab === "evaluations") {
       loadEvaluations();
     }
-    showToast("Refreshing data...", "info");
+    if (activeTab === "domains") {
+      loadDomains();
+    }
   };
 
   const handleManualAllocate = async (groupId: string, mentorId: string) => {
     try {
       await adminApi.allocateMentor({ groupId, mentorId });
       showToast("Mentor allocated successfully!", "success");
-      invalidateCache(CACHE_KEYS.MENTOR_OVERVIEW);
-      invalidateCache(CACHE_KEYS.GROUPS);
-      invalidateCache(CACHE_KEYS.FACULTY_LIST);
+      invalidateCache(CACHE_KEYS.ADMIN_DASHBOARD);
       await loadData(true);
     } catch (error: any) {
       showToast(error.message || "Failed to allocate mentor", "error");
@@ -334,9 +434,7 @@ export default function AdminDashboard() {
     try {
       await mentorFormApi.create({ availableMentorIds: selectedMentors });
       showToast("Mentor Allocation Form rolled out successfully!", "success");
-      invalidateCache(CACHE_KEYS.MENTOR_OVERVIEW);
-      invalidateCache(CACHE_KEYS.GROUPS);
-      invalidateCache(CACHE_KEYS.FACULTY_LIST);
+      invalidateCache(CACHE_KEYS.ADMIN_DASHBOARD);
       await loadData(true);
     } catch (error: any) {
       showToast(error.message || "Failed to roll out form", "error");
@@ -358,9 +456,7 @@ export default function AdminDashboard() {
             ? "Review 2"
             : "Final Review";
       showToast(`${reviewName} rolled out successfully!`, "success");
-      invalidateCache(CACHE_KEYS.MENTOR_OVERVIEW);
-      invalidateCache(CACHE_KEYS.GROUPS);
-      invalidateCache(CACHE_KEYS.FACULTY_LIST);
+      invalidateCache(CACHE_KEYS.ADMIN_DASHBOARD);
       await loadData(true);
     } catch (error: any) {
       showToast(error.message || "Failed to roll out review", "error");
@@ -385,10 +481,10 @@ export default function AdminDashboard() {
               variant="outline"
               onClick={handleRefresh}
               size="sm"
-              disabled={initialLoading}
+              disabled={refreshing}
             >
               <RefreshCw
-                className={`h-4 w-4 mr-2 ${initialLoading ? "animate-spin" : ""}`}
+                className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`}
               />
               Refresh
             </Button>
@@ -488,7 +584,7 @@ export default function AdminDashboard() {
         ) : (
           /* Tabs for Overview vs Management */
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="w-full grid grid-cols-3">
+            <TabsList className="w-full grid grid-cols-4">
               <TabsTrigger value="overview">
                 Mentor & Group Overview
               </TabsTrigger>
@@ -496,6 +592,7 @@ export default function AdminDashboard() {
                 Form & Review Management
               </TabsTrigger>
               <TabsTrigger value="evaluations">Review Evaluations</TabsTrigger>
+              <TabsTrigger value="domains">Domains</TabsTrigger>
             </TabsList>
 
             {/* Overview Tab */}
@@ -937,6 +1034,133 @@ export default function AdminDashboard() {
                           </div>
                         );
                       })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* Domains Tab */}
+            <TabsContent value="domains" className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Tags className="h-5 w-5" />
+                    Project Domains
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-gray-600">
+                    Domains students choose from when submitting a project
+                    topic. Deactivate a domain to hide it from new
+                    submissions without deleting past topics that use it.
+                  </p>
+
+                  <div className="flex gap-2">
+                    <Input
+                      value={newDomainName}
+                      onChange={(e) => setNewDomainName(e.target.value)}
+                      placeholder="e.g., Cybersecurity"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleAddDomain();
+                      }}
+                    />
+                    <Button
+                      onClick={handleAddDomain}
+                      disabled={addingDomain || !newDomainName.trim()}
+                      className="gap-1 shrink-0"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Add Domain
+                    </Button>
+                  </div>
+
+                  {domainsLoading ? (
+                    <div className="text-center py-8">Loading domains...</div>
+                  ) : domains.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      No domains added yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {domains.map((domain) => (
+                        <div
+                          key={domain.id}
+                          className="flex items-center justify-between border border-gray-200 rounded-lg p-3"
+                        >
+                          {editingDomainId === domain.id ? (
+                            <div className="flex items-center gap-2 flex-1">
+                              <Input
+                                value={editingDomainName}
+                                onChange={(e) =>
+                                  setEditingDomainName(e.target.value)
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") handleSaveEditDomain();
+                                  if (e.key === "Escape") setEditingDomainId(null);
+                                }}
+                                autoFocus
+                              />
+                              <Button size="sm" onClick={handleSaveEditDomain}>
+                                Save
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setEditingDomainId(null)}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-gray-900">
+                                  {domain.name}
+                                </span>
+                                <Badge variant={domain.isActive ? "success" : "outline"}>
+                                  {domain.isActive ? "Active" : "Inactive"}
+                                </Badge>
+                                {!!domain._count?.topics && (
+                                  <span className="text-xs text-gray-500">
+                                    {domain._count.topics} topic
+                                    {domain._count.topics === 1 ? "" : "s"}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleStartEditDomain(domain)}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleToggleDomainActive(domain)}
+                                >
+                                  {domain.isActive ? "Deactivate" : "Activate"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  disabled={!!domain._count?.topics}
+                                  title={
+                                    domain._count?.topics
+                                      ? "Used by existing topics - deactivate instead"
+                                      : undefined
+                                  }
+                                  onClick={() => handleDeleteDomain(domain)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </CardContent>
