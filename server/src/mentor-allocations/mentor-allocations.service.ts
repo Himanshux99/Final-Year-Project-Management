@@ -68,6 +68,28 @@ export class MentorAllocationsService {
     });
   }
 
+  // A mentor may act on their own requests. A super admin may act on any mentor's
+  // request for a group in their own department (on the mentor's behalf).
+  private async assertCanActOnAllocation(
+    profile: { id: string; role: string; department: string },
+    allocation: { mentorId: string; groupId: string },
+    verb: 'accept' | 'reject',
+  ) {
+    if (profile.role === 'super_admin') {
+      const group = await this.prisma.group.findUnique({
+        where: { id: allocation.groupId },
+        select: { department: true },
+      });
+      if (!group || group.department !== profile.department) {
+        throw new ForbiddenException('Group belongs to another department');
+      }
+      return;
+    }
+    if (allocation.mentorId !== profile.id) {
+      throw new ForbiddenException(`Can only ${verb} your own allocations`);
+    }
+  }
+
   async acceptAllocation(userId: string, allocationId: string) {
     const profile = await this.profilesService.findByUserId(userId);
     if (!profile) {
@@ -86,9 +108,7 @@ export class MentorAllocationsService {
       throw new NotFoundException('Allocation not found');
     }
 
-    if (allocation.mentorId !== profile.id) {
-      throw new ForbiddenException('Can only accept your own allocations');
-    }
+    await this.assertCanActOnAllocation(profile, allocation, 'accept');
 
     if (allocation.status !== 'pending') {
       const statusMessage =
@@ -107,7 +127,7 @@ export class MentorAllocationsService {
       // Count already accepted teams for this mentor
       const acceptedCount = await tx.mentorAllocation.count({
         where: {
-          mentorId: profile.id,
+          mentorId: allocation.mentorId,
           status: 'accepted',
         },
       });
@@ -115,6 +135,15 @@ export class MentorAllocationsService {
       if (acceptedCount >= 3) {
         throw new BadRequestException(
           'Maximum limit of 3 teams has already been reached.',
+        );
+      }
+
+      const groupAlreadyAccepted = await tx.mentorAllocation.count({
+        where: { groupId: allocation.groupId, status: 'accepted' },
+      });
+      if (groupAlreadyAccepted > 0) {
+        throw new BadRequestException(
+          'This team has already been accepted by a mentor.',
         );
       }
 
@@ -138,7 +167,7 @@ export class MentorAllocationsService {
       if (acceptedCount + 1 === 3) {
         await tx.mentorAllocation.updateMany({
           where: {
-            mentorId: profile.id,
+            mentorId: allocation.mentorId,
             status: {
               in: ['pending', 'waiting'],
             },
@@ -171,9 +200,7 @@ export class MentorAllocationsService {
       throw new NotFoundException('Allocation not found');
     }
 
-    if (allocation.mentorId !== profile.id) {
-      throw new ForbiddenException('Can only reject your own allocations');
-    }
+    await this.assertCanActOnAllocation(profile, allocation, 'reject');
 
     if (allocation.status !== 'pending') {
       const statusMessage =
@@ -325,7 +352,20 @@ export class MentorAllocationsService {
     });
   }
 
-  async removeTeam(groupId: string) {
+  private async requireStaff(userId: string) {
+    const profile = await this.profilesService.findByUserId(userId);
+    if (!profile) {
+      throw new BadRequestException('Profile not found');
+    }
+    if (profile.role !== 'faculty' && profile.role !== 'super_admin') {
+      throw new ForbiddenException('Only faculty can perform this action');
+    }
+    return profile;
+  }
+
+  async removeTeam(userId: string, groupId: string) {
+    const profile = await this.requireStaff(userId);
+
     return this.prisma.$transaction(async (tx) => {
       const allocation = await tx.mentorAllocation.findFirst({
         where: {
@@ -336,6 +376,10 @@ export class MentorAllocationsService {
 
       if (!allocation) {
         throw new NotFoundException("Accepted team assignment not found");
+      }
+
+      if (profile.role !== 'super_admin' && allocation.mentorId !== profile.id) {
+        throw new ForbiddenException('Can only remove your own teams');
       }
 
       // Mark current allocation as rejected instead of deleting it
@@ -355,13 +399,13 @@ export class MentorAllocationsService {
       //   },
       // });
 
-      // Find the next highest preference
+      // Escalate to the next lower-ranked preference (never re-pend the removed mentor)
       const nextPreference = await tx.mentorAllocation.findFirst({
         where: {
           groupId,
-          status: {
-            in: ["waiting", "rejected"],
-          },
+          formId: allocation.formId,
+          status: "waiting",
+          preferenceRank: { gt: allocation.preferenceRank },
         },
         orderBy: {
           preferenceRank: "asc",
@@ -384,7 +428,8 @@ export class MentorAllocationsService {
     });
   }
 
-  async getMentorAllocationStats() {
+  async getMentorAllocationStats(userId: string) {
+    await this.requireStaff(userId);
     const [mentors, preferences, allocations] = await Promise.all([
       this.prisma.profile.findMany({
         where: { role: "faculty" },

@@ -24,6 +24,29 @@ export const removeToken = (): void => {
   localStorage.removeItem(TOKEN_KEY);
 };
 
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+async function throwResponseError(response: Response): Promise<never> {
+  const error = await response.json().catch(() => ({
+    message: response.statusText,
+  }));
+  // Expired/invalid token: drop it so we don't keep retrying with it
+  if (response.status === 401 && getToken()) {
+    removeToken();
+  }
+  const message = Array.isArray(error.message)
+    ? error.message.join(", ")
+    : error.message;
+  throw new ApiError(message || `HTTP ${response.status}`, response.status);
+}
+
 // Fetch wrapper with auth
 async function apiFetch<T>(
   endpoint: string,
@@ -48,10 +71,7 @@ async function apiFetch<T>(
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({
-      message: response.statusText,
-    }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+    await throwResponseError(response);
   }
 
   // Handle empty responses (204 No Content or empty body)
@@ -84,10 +104,7 @@ async function apiUpload<T>(
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({
-      message: response.statusText,
-    }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+    await throwResponseError(response);
   }
 
   const text = await response.text();
@@ -107,15 +124,20 @@ async function apiUploadWithFields<T>(
   const token = getToken();
   const formData = new FormData();  
   formData.append("file", file);
-  Object.entries(fields).forEach(([key, value]) => formData.append(key, value));
+  Object.entries(fields).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      value.forEach((v) => formData.append(key, v));
+    } else {
+      formData.append(key, value);
+    }
+  });
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
   method,
   headers: token ? { Authorization: `Bearer ${token}` } : {},
   body: formData,
 });
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: response.statusText }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+    await throwResponseError(response);
   }
   const text = await response.text();
   return text ? JSON.parse(text) : (null as T);

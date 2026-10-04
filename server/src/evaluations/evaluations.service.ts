@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProfilesService } from '../profiles/profiles.service';
+import { GroupsService } from '../groups/groups.service';
 import { ReviewType } from '@prisma/client';
 
 interface StudentGradeInput {
@@ -51,7 +52,16 @@ export class EvaluationsService {
   constructor(
     private prisma: PrismaService,
     private profilesService: ProfilesService,
+    private groupsService: GroupsService,
   ) {}
+
+  private async requireProfile(userId: string) {
+    const profile = await this.profilesService.findByUserId(userId);
+    if (!profile) {
+      throw new BadRequestException('Profile not found');
+    }
+    return profile;
+  }
 
   /**
    * Create a review evaluation (faculty only)
@@ -64,6 +74,35 @@ export class EvaluationsService {
 
     if (profile.role !== 'faculty' && profile.role !== 'super_admin') {
       throw new ForbiddenException('Only faculty/admin can create evaluations');
+    }
+
+    // The session is the source of truth for which group is being evaluated
+    const session = await this.prisma.reviewSession.findUnique({
+      where: { id: dto.sessionId },
+    });
+    if (!session) {
+      throw new NotFoundException('Review session not found');
+    }
+    if (dto.groupId && dto.groupId !== session.groupId) {
+      throw new BadRequestException('Session does not belong to this group');
+    }
+    dto.groupId = session.groupId;
+    dto.reviewType = session.reviewType;
+    await this.groupsService.assertGroupAccess(profile, session.groupId);
+
+    const members = await this.prisma.groupMember.findMany({
+      where: { groupId: session.groupId },
+      select: { profileId: true },
+    });
+    const memberIds = new Set(members.map((m) => m.profileId));
+    if (
+      !Array.isArray(dto.studentGrades) ||
+      dto.studentGrades.length === 0 ||
+      dto.studentGrades.some((g) => !memberIds.has(g.profileId))
+    ) {
+      throw new BadRequestException(
+        'Grades must be provided only for members of this group',
+      );
     }
 
     // Check if evaluation already exists for this session
@@ -158,7 +197,7 @@ export class EvaluationsService {
         },
       });
 
-      const a = await tx.reviewSession.update({
+      await tx.reviewSession.update({
         where: {
           id: dto.sessionId,
         },
@@ -166,8 +205,6 @@ export class EvaluationsService {
           progressPercentage: dto.completionPercentage,
         },
       });
-
-      console.log('Updated session progress percentage:', a.progressPercentage);
 
       return evaluation;
     });
@@ -179,7 +216,8 @@ export class EvaluationsService {
   /**
    * Get evaluation by session ID
    */
-  async getBySessionId(sessionId: string) {
+  async getBySessionId(userId: string, sessionId: string) {
+    const profile = await this.requireProfile(userId);
     const evaluation = await this.prisma.reviewEvaluation.findUnique({
       where: { sessionId },
       include: {
@@ -199,13 +237,18 @@ export class EvaluationsService {
       },
     });
 
+    if (evaluation) {
+      await this.groupsService.assertGroupAccess(profile, evaluation.groupId);
+    }
     return evaluation;
   }
 
   /**
    * Get all evaluations for a group
    */
-  async getByGroupId(groupId: string) {
+  async getByGroupId(userId: string, groupId: string) {
+    const profile = await this.requireProfile(userId);
+    await this.groupsService.assertGroupAccess(profile, groupId);
     const evaluations = await this.prisma.reviewEvaluation.findMany({
       where: { groupId },
       include: {
@@ -229,9 +272,16 @@ export class EvaluationsService {
   /**
    * Get all evaluations for admin dashboard
    */
-  async getAllEvaluations(filters?: { reviewType?: ReviewType; department?: string }) {
+  async getAllEvaluations(
+    userId: string,
+    filters?: { reviewType?: ReviewType; department?: string },
+  ) {
+    const profile = await this.requireProfile(userId);
+    if (profile.role !== 'super_admin') {
+      throw new ForbiddenException('Only super admins can view all evaluations');
+    }
     const where: any = {};
-    
+
     if (filters?.reviewType) {
       where.reviewType = filters.reviewType;
     }
@@ -260,18 +310,18 @@ export class EvaluationsService {
       orderBy: { filledAt: 'desc' },
     });
 
-    // Filter by department if specified
-    if (filters?.department) {
-      return evaluations.filter(e => e.group.department === filters.department);
-    }
-
-    return evaluations;
+    // Super admins only ever see their own department
+    return evaluations.filter((e) => e.group.department === profile.department);
   }
 
   /**
    * Get pre-fill data for evaluation form
    */
-  async getPreFillData(sessionId: string) {
+  async getPreFillData(userId: string, sessionId: string) {
+    const profile = await this.requireProfile(userId);
+    if (profile.role !== 'faculty' && profile.role !== 'super_admin') {
+      throw new ForbiddenException('Only faculty/admin can fetch evaluation data');
+    }
     const session = await this.prisma.reviewSession.findUnique({
       where: { id: sessionId },
     });
@@ -313,6 +363,7 @@ export class EvaluationsService {
     if (!group) {
       throw new NotFoundException('Group not found');
     }
+    await this.groupsService.assertGroupAccess(profile, group.id);
 
     const mentor = group.allocations[0]?.mentor;
     const approvedTopic = group.topics[0];

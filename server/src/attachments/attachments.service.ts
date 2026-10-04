@@ -115,7 +115,7 @@ export class AttachmentsService {
 
     // Generate storage path (no stage now, just group/timestamp)
     const fileExtension = file.originalname.split('.').pop() || '';
-    const storagePath = `${group.id}/files/${Date.now()}.${fileExtension}`;
+    const storagePath = `${group.id}/files/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${fileExtension}`;
 
     // Upload to Supabase
     const fileUrl = await this.supabaseService.uploadFile(
@@ -158,6 +158,15 @@ export class AttachmentsService {
         },
       },
     });
+  }
+
+  async getAttachmentsForUser(userId: string, groupId: string) {
+    const profile = await this.profilesService.findByUserId(userId);
+    if (!profile) {
+      throw new BadRequestException('Profile not found');
+    }
+    await this.groupsService.assertGroupAccess(profile, groupId);
+    return this.getAttachmentsByGroup(groupId);
   }
 
   async getMyGroupAttachments(userId: string) {

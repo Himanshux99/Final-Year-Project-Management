@@ -8,6 +8,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ProfilesService } from '../profiles/profiles.service';
 import { Department } from '@prisma/client';
 
+const MAX_GROUP_SIZE = 3;
+
 @Injectable()
 export class GroupsService {
   constructor(
@@ -60,7 +62,11 @@ export class GroupsService {
     // Generate group ID and team code
     const serial = await this.getNextGroupSerial(profile.department);
     const groupId = `${profile.department}${serial.toString().padStart(2, '0')}`;
-    const teamCode = this.generateTeamCode();
+    // Retry on the (rare) team code collision
+    let teamCode = this.generateTeamCode();
+    while (await this.prisma.group.findUnique({ where: { teamCode } })) {
+      teamCode = this.generateTeamCode();
+    }
 
     // Create group with the creator as the first member
     const group = await this.prisma.group.create({
@@ -87,7 +93,8 @@ export class GroupsService {
     return group;
   }
 
-  async joinByTeamCode(userId: string, teamCode: string) {
+  async joinByTeamCode(userId: string, rawTeamCode: string) {
+    const teamCode = rawTeamCode.trim().toUpperCase();
     // Get user profile
     const profile = await this.profilesService.findByUserId(userId);
     if (!profile) {
@@ -139,25 +146,30 @@ export class GroupsService {
     }
 
     // Check if group is full
-    if (group.members.length >= 4) {
-      throw new BadRequestException('Group is full (max 4 members)');
+    if (group.members.length >= MAX_GROUP_SIZE) {
+      throw new BadRequestException(
+        `Group is full (max ${MAX_GROUP_SIZE} members)`,
+      );
     }
 
-    // Add member
-    await this.prisma.groupMember.create({
-      data: {
-        groupId: group.id,
-        profileId: profile.id,
-      },
-    });
-
-    // Update isFull flag if needed
-    if (group.members.length + 1 >= 3) {
-      await this.prisma.group.update({
-        where: { id: group.id },
-        data: { isFull: true },
+    // Re-check capacity inside a transaction so concurrent joins can't overfill
+    await this.prisma.$transaction(async (tx) => {
+      const count = await tx.groupMember.count({ where: { groupId: group.id } });
+      if (count >= MAX_GROUP_SIZE) {
+        throw new BadRequestException(
+          `Group is full (max ${MAX_GROUP_SIZE} members)`,
+        );
+      }
+      await tx.groupMember.create({
+        data: { groupId: group.id, profileId: profile.id },
       });
-    }
+      if (count + 1 >= MAX_GROUP_SIZE) {
+        await tx.group.update({
+          where: { id: group.id },
+          data: { isFull: true },
+        });
+      }
+    });
 
     // Return updated group
     return this.findById(group.id);
@@ -173,6 +185,12 @@ export class GroupsService {
           },
         },
         creator: true,
+        // The mentor who accepted this group (at most one)
+        allocations: {
+          where: { status: 'accepted' },
+          include: { mentor: { select: { id: true, name: true, email: true } } },
+          take: 1,
+        },
       },
     });
   }
@@ -209,6 +227,47 @@ export class GroupsService {
       });
       return membership?.group || null;
     }
+
+  /**
+   * Throws unless the profile may act on the given group:
+   * students must be members, faculty must be the group's accepted mentor,
+   * super admins may access any group in their department.
+   */
+  async assertGroupAccess(
+    profile: { id: string; role: string; department: Department },
+    groupId: string,
+  ) {
+    if (profile.role === 'student') {
+      const membership = await this.prisma.groupMember.findFirst({
+        where: { groupId, profileId: profile.id },
+        select: { id: true },
+      });
+      if (!membership) {
+        throw new ForbiddenException('You are not a member of this group');
+      }
+      return;
+    }
+
+    if (profile.role === 'super_admin') {
+      const group = await this.prisma.group.findUnique({
+        where: { id: groupId },
+        select: { department: true },
+      });
+      if (!group) throw new NotFoundException('Group not found');
+      if (group.department !== profile.department) {
+        throw new ForbiddenException('Group belongs to another department');
+      }
+      return;
+    }
+
+    const allocation = await this.prisma.mentorAllocation.findFirst({
+      where: { groupId, mentorId: profile.id, status: 'accepted' },
+      select: { id: true },
+    });
+    if (!allocation) {
+      throw new ForbiddenException('You are not the mentor of this group');
+    }
+  }
 
   async getMyGroup(userId: string) {
     const profile = await this.profilesService.findByUserId(userId);

@@ -46,15 +46,16 @@ export class TopicApprovalController {
    * Get topic approval document for a specific group (faculty/admin)
    */
   @Get('group/:groupId')
-  async getDocument(@Param('groupId') groupId: string) {
-    return this.topicApprovalService.getDocument(groupId);
+  async getDocument(@Req() req: AuthenticatedRequest, @Param('groupId') groupId: string) {
+    return this.topicApprovalService.getDocumentForUser(req.user.userId, groupId);
   }
 
   /**
    * Check if topic approval document exists for a group
    */
   @Get('exists/:groupId')
-  async hasDocument(@Param('groupId') groupId: string) {
+  async hasDocument(@Req() req: AuthenticatedRequest, @Param('groupId') groupId: string) {
+    await this.topicApprovalService.assertAccess(req.user.userId, groupId);
     const exists = await this.topicApprovalService.hasDocument(groupId);
     return { exists };
   }

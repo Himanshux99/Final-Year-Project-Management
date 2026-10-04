@@ -69,24 +69,24 @@ export class EvaluationsController {
    * Get pre-fill data for evaluation form
    */
   @Get('prefill/:sessionId')
-  async getPreFillData(@Param('sessionId') sessionId: string) {
-    return this.evaluationsService.getPreFillData(sessionId);
+  async getPreFillData(@Req() req: AuthenticatedRequest, @Param('sessionId') sessionId: string) {
+    return this.evaluationsService.getPreFillData(req.user.userId, sessionId);
   }
 
   /**
    * Get evaluation by session ID
    */
   @Get('session/:sessionId')
-  async getBySessionId(@Param('sessionId') sessionId: string) {
-    return this.evaluationsService.getBySessionId(sessionId);
+  async getBySessionId(@Req() req: AuthenticatedRequest, @Param('sessionId') sessionId: string) {
+    return this.evaluationsService.getBySessionId(req.user.userId, sessionId);
   }
 
   /**
    * Get all evaluations for a group
    */
   @Get('group/:groupId')
-  async getByGroupId(@Param('groupId') groupId: string) {
-    return this.evaluationsService.getByGroupId(groupId);
+  async getByGroupId(@Req() req: AuthenticatedRequest, @Param('groupId') groupId: string) {
+    return this.evaluationsService.getByGroupId(req.user.userId, groupId);
   }
 
   /**
@@ -94,9 +94,10 @@ export class EvaluationsController {
    */
   @Get('admin')
   async getAllEvaluations(
+    @Req() req: AuthenticatedRequest,
     @Query('reviewType') reviewType?: ReviewType,
     @Query('department') department?: string,
   ) {
-    return this.evaluationsService.getAllEvaluations({ reviewType, department });
+    return this.evaluationsService.getAllEvaluations(req.user.userId, { reviewType, department });
   }
 }

@@ -39,8 +39,8 @@ export class MentorAllocationsController {
 
   @UseGuards(JwtAuthGuard)
   @Get("stats")
-  getMentorAllocationStats() {
-    return this.mentorAllocationsService.getMentorAllocationStats();
+  getMentorAllocationStats(@Request() req: ExpressRequest) {
+    return this.mentorAllocationsService.getMentorAllocationStats(req.user.userId);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -61,7 +61,6 @@ export class MentorAllocationsController {
     @Param("groupId") groupId: string,
     @Request() req: ExpressRequest,
   ) {
-    // console.log(`Removing team with groupId: ${groupId} for userId: ${req.user.userId}`);
-    return this.mentorAllocationsService.removeTeam(groupId);
+    return this.mentorAllocationsService.removeTeam(req.user.userId, groupId);
   }
 }

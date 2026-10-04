@@ -24,10 +24,11 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      // Append @vit.edu.in if it's missing
-      const normalizedEmail = email.trim().endsWith("@vit.edu.in")
-        ? email.trim()
-        : `${email.trim()}@vit.edu.in`;
+      // Append @vit.edu.in only when no domain was typed
+      const trimmedEmail = email.trim();
+      const normalizedEmail = trimmedEmail.includes("@")
+        ? trimmedEmail
+        : `${trimmedEmail}@vit.edu.in`;
 
       const response = await authApi.login({
         email: normalizedEmail,

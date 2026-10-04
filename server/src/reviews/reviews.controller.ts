@@ -135,8 +135,11 @@ export class ReviewsController {
 
   @UseGuards(JwtAuthGuard)
   @Get('messages/session/:sessionId')
-  async getMessagesBySession(@Param('sessionId') sessionId: string) {
-    return this.reviewsService.getMessagesBySession(sessionId);
+  async getMessagesBySession(
+    @Request() req: ExpressRequest,
+    @Param('sessionId') sessionId: string,
+  ) {
+    return this.reviewsService.getMessagesBySession(sessionId, req.user.userId);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -156,7 +159,7 @@ export class ReviewsController {
   ) {
     return this.reviewsService.getSessionsByGroupIds(
       req.user.userId,
-      body.groupIds,
+      Array.isArray(body.groupIds) ? body.groupIds : [],
     );
   }
 }

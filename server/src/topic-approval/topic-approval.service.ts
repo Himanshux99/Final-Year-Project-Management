@@ -114,6 +114,19 @@ export class TopicApprovalService {
     return document;
   }
 
+  async assertAccess(userId: string, groupId: string) {
+    const profile = await this.profilesService.findByUserId(userId);
+    if (!profile) {
+      throw new BadRequestException('Profile not found');
+    }
+    await this.groupsService.assertGroupAccess(profile, groupId);
+  }
+
+  async getDocumentForUser(userId: string, groupId: string) {
+    await this.assertAccess(userId, groupId);
+    return this.getDocument(groupId);
+  }
+
   /**
    * Get topic approval document for a group
    */

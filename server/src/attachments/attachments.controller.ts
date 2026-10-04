@@ -48,8 +48,11 @@ export class AttachmentsController {
   }
 
   @Get('group/:groupId')
-  async getAttachmentsByGroup(@Param('groupId') groupId: string) {
-    return this.attachmentsService.getAttachmentsByGroup(groupId);
+  async getAttachmentsByGroup(
+    @Request() req: ExpressRequest,
+    @Param('groupId') groupId: string,
+  ) {
+    return this.attachmentsService.getAttachmentsForUser(req.user.userId, groupId);
   }
 
   @Delete(':id')

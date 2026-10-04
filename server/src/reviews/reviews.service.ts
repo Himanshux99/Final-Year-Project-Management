@@ -201,6 +201,7 @@ export class ReviewsService {
     if (!session) {
       throw new NotFoundException('Review session not found');
     }
+    await this.groupsService.assertGroupAccess(profile, session.groupId);
 
     return this.prisma.reviewSession.update({
       where: { id: sessionId },
@@ -230,7 +231,7 @@ export class ReviewsService {
     if (!session) {
       throw new NotFoundException('Review session not found');
     }
-    // console.log('session:', session);
+    await this.groupsService.assertGroupAccess(profile, session.groupId);
     return this.prisma.reviewSession.update({
       where: { id: sessionId },
       data: {
@@ -269,6 +270,7 @@ export class ReviewsService {
     ) {
       throw new ForbiddenException('Only faculty can access group sessions');
     }
+    await this.groupsService.assertGroupAccess(profile, groupId);
 
     return this.prisma.reviewSession.findUnique({
       where: {
@@ -294,6 +296,7 @@ export class ReviewsService {
     if (!session) {
       throw new NotFoundException('Review session not found');
     }
+    await this.groupsService.assertGroupAccess(profile, session.groupId);
 
     return this.prisma.reviewMessage.create({
       data: {
@@ -309,7 +312,18 @@ export class ReviewsService {
   }
 
   // Get messages for review session
-  async getMessagesBySession(sessionId: string) {
+  async getMessagesBySession(sessionId: string, userId?: string) {
+    if (userId) {
+      const profile = await this.profilesService.findByUserId(userId);
+      const session = await this.prisma.reviewSession.findUnique({
+        where: { id: sessionId },
+        select: { groupId: true },
+      });
+      if (!profile || !session) {
+        throw new NotFoundException('Review session not found');
+      }
+      await this.groupsService.assertGroupAccess(profile, session.groupId);
+    }
     return this.prisma.reviewMessage.findMany({
       where: { sessionId },
       orderBy: { createdAt: 'asc' },
@@ -377,6 +391,24 @@ export class ReviewsService {
       throw new ForbiddenException(
         'Only faculty can access group sessions',
       );
+    }
+
+    if (profile.role === 'faculty') {
+      const mine = await this.prisma.mentorAllocation.findMany({
+        where: {
+          mentorId: profile.id,
+          status: 'accepted',
+          groupId: { in: groupIds },
+        },
+        select: { groupId: true },
+      });
+      groupIds = mine.map((a) => a.groupId);
+    } else {
+      const inDept = await this.prisma.group.findMany({
+        where: { id: { in: groupIds }, department: profile.department },
+        select: { id: true },
+      });
+      groupIds = inDept.map((g) => g.id);
     }
 
     return this.prisma.reviewSession.findMany({
