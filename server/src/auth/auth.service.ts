@@ -1,9 +1,15 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { UsersService } from '../users/users.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -13,7 +19,8 @@ export class AuthService {
   ) {}
 
   async signup(signupDto: SignupDto) {
-    const { email, password } = signupDto;
+    const email = signupDto.email.trim().toLowerCase();
+    const { password } = signupDto;
 
     // Check if user exists
     const existingUser = await this.usersService.findByEmail(email);
@@ -44,7 +51,8 @@ export class AuthService {
   }
 
   async login(loginDto: LoginDto) {
-    const { email, password } = loginDto;
+    const email = loginDto.email.trim().toLowerCase();
+    const { password } = loginDto;
 
     // Find user
     const user = await this.usersService.findByEmail(email);
@@ -99,6 +107,24 @@ export class AuthService {
       },
       profile,
     };
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.usersService.findById(userId);
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const matches = await bcrypt.compare(dto.currentPassword, user.password);
+    if (!matches) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException('New password must be different from the current one');
+    }
+
+    await this.usersService.updatePassword(userId, await bcrypt.hash(dto.newPassword, 10));
+    return { message: 'Password changed successfully' };
   }
 
   private generateToken(userId: string, email: string): string {

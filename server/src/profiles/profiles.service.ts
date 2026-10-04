@@ -1,20 +1,12 @@
 import {
   Injectable,
   BadRequestException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { Department, Role } from '@prisma/client';
-
-// Access codes for super admin
-const ACCESS_CODES: Record<Department, string> = {
-  IT: 'ITADMIN2025',
-  CS: 'CSADMIN2025',
-  ECS: 'ECSADMIN2025',
-  ETC: 'ETCADMIN2025',
-  BM: 'BMADMIN2025',
-};
 
 @Injectable()
 export class ProfilesService {
@@ -28,25 +20,17 @@ export class ProfilesService {
       department,
       rollNumber,
       semester,
-      accessCode,
-      domains,
     } = createProfileDto;
 
-    // Validate access code for super admin
-    if (role === 'super_admin') {
-      if (!accessCode || ACCESS_CODES[department] !== accessCode) {
-        throw new BadRequestException('Invalid coordinator access code');
-      }
+    // Faculty/admin accounts are provisioned by a super admin, never self-created.
+    if (role !== 'student') {
+      throw new ForbiddenException('Only students can create a profile themselves');
     }
-
-    // Validate student fields
-    if (role === 'student') {
-      if (!rollNumber) {
-        throw new BadRequestException('Roll number is required for students');
-      }
-      if (!semester) {
-        throw new BadRequestException('Semester is required for students');
-      }
+    if (!rollNumber) {
+      throw new BadRequestException('Roll number is required for students');
+    }
+    if (!semester) {
+      throw new BadRequestException('Semester is required for students');
     }
 
     // Check if profile already exists
@@ -65,10 +49,8 @@ export class ProfilesService {
         email,
         role: role as Role,
         department: department as Department,
-        rollNumber: role === 'student' ? rollNumber : null,
-        semester: role === 'student' ? semester : null,
-        domains:
-          role === 'faculty' || role === 'super_admin' ? domains || null : null,
+        rollNumber,
+        semester,
       },
     });
   }

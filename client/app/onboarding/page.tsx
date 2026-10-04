@@ -10,7 +10,10 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth-context";
 import { profileApi } from "@/lib/api";
-import { Role, Department, ACCESS_CODES } from "@/types";
+import { Department } from "@/types";
+
+// e.g. 24101B0035 = 24 (admission year) + 101 (branch code) + B (division) + 0035 (roll no.)
+const ROLL_NUMBER_REGEX = /^\d{2}\d{3}[A-Z]\d{4}$/;
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -20,11 +23,9 @@ export default function OnboardingPage() {
 
   const [name, setName] = useState("");
   const [department, setDepartment] = useState<Department>("IT");
-  const [role, setRole] = useState<Role>("student");
   const [rollNumber, setRollNumber] = useState("");
   const [semester, setSemester] = useState("1");
-  const [accessCode, setAccessCode] = useState("");
-  const [domains, setDomains] = useState("");
+  const [rollNumberError, setRollNumberError] = useState("");
 
   useEffect(() => {
     // Wait for auth to finish loading
@@ -50,38 +51,25 @@ export default function OnboardingPage() {
       return;
     }
 
-    // Validate super admin access code
-    if (role === "super_admin") {
-      if (ACCESS_CODES[department] !== accessCode) {
-        showToast("Invalid coordinator access code", "error");
-        return;
-      }
+    const normalizedRoll = rollNumber.trim().toUpperCase();
+    if (!ROLL_NUMBER_REGEX.test(normalizedRoll)) {
+      setRollNumberError(
+        "Use the format 24101B0035: 2-digit year, 3-digit branch code, 1 division letter, 4-digit roll number",
+      );
+      return;
     }
 
     setLoading(true);
 
     try {
-      const profileData: any = {
+      const profileData = {
         name,
         email: user.email,
-        role,
+        role: "student" as const,
         department,
+        rollNumber: normalizedRoll,
+        semester: parseInt(semester),
       };
-
-      if (role === "student") {
-        profileData.rollNumber = rollNumber;
-        profileData.semester = parseInt(semester);
-      }
-
-      if (role === "super_admin") {
-        profileData.accessCode = accessCode;
-      }
-
-      if (role === "faculty" || role === "super_admin") {
-        if (domains.trim()) {
-          profileData.domains = domains.trim();
-        }
-      }
 
       await profileApi.create(profileData);
       await refreshAuth();
@@ -132,114 +120,72 @@ export default function OnboardingPage() {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  Department
+                </label>
+                <Select
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value as Department)}
+                  required
+                >
+                  <option value="IT">Information Technology (IT)</option>
+                  <option value="CS">Computer Science (CS)</option>
+                  <option value="ECS">
+                    Electronics & Computer Science (ECS)
+                  </option>
+                  <option value="ETC">
+                    Electronics & Telecommunication (ETC)
+                  </option>
+                  <option value="BM">Biomedical Engineering (BM)</option>
+                </Select>
+              </div>
+
               <div className="grid md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-2">
-                    Department
+                    Roll Number
                   </label>
-                  <Select
-                    value={department}
-                    onChange={(e) =>
-                      setDepartment(e.target.value as Department)
-                    }
+                  <Input
+                    type="text"
+                    placeholder="24101B0035"
+                    value={rollNumber}
+                    maxLength={10}
+                    onChange={(e) => {
+                      setRollNumber(e.target.value.toUpperCase());
+                      setRollNumberError("");
+                    }}
                     required
-                  >
-                    <option value="IT">Information Technology (IT)</option>
-                    <option value="CS">Computer Science (CS)</option>
-                    <option value="ECS">
-                      Electronics & Computer Science (ECS)
-                    </option>
-                    <option value="ETC">
-                      Electronics & Telecommunication (ETC)
-                    </option>
-                    <option value="BM">Biomedical Engineering (BM)</option>
-                  </Select>
+                  />
+                  {rollNumberError ? (
+                    <p className="text-xs text-red-600 mt-1">
+                      {rollNumberError}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Year (2) + branch code (3) + division letter (1) + roll
+                      no. (4)
+                    </p>
+                  )}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">Role</label>
+                  <label className="block text-sm font-medium mb-2">
+                    Semester
+                  </label>
                   <Select
-                    value={role}
-                    onChange={(e) => setRole(e.target.value as Role)}
+                    value={semester}
+                    onChange={(e) => setSemester(e.target.value)}
                     required
                   >
-                    <option value="student">Student</option>
-                    <option value="faculty">Faculty (Mentor)</option>
-                    <option value="super_admin">
-                      Super Admin (Coordinator)
-                    </option>
+                    {[1, 2, 3, 4, 5, 6, 7, 8].map((sem) => (
+                      <option key={sem} value={sem}>
+                        {sem}
+                      </option>
+                    ))}
                   </Select>
                 </div>
               </div>
-
-              {role === "student" && (
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-2">
-                      Roll Number
-                    </label>
-                    <Input
-                      type="text"
-                      placeholder="2024IT001"
-                      value={rollNumber}
-                      onChange={(e) => setRollNumber(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium mb-2">
-                      Semester
-                    </label>
-                    <Select
-                      value={semester}
-                      onChange={(e) => setSemester(e.target.value)}
-                      required
-                    >
-                      {[1, 2, 3, 4, 5, 6, 7, 8].map((sem) => (
-                        <option key={sem} value={sem}>
-                          {sem}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                </div>
-              )}
-
-              {role === "super_admin" && (
-                <div>
-                  <label className="block text-sm font-medium mb-2">
-                    Coordinator Access Code
-                  </label>
-                  <Input
-                    type="text"
-                    placeholder="Enter access code"
-                    value={accessCode}
-                    onChange={(e) => setAccessCode(e.target.value)}
-                    required
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Contact your department head for the coordinator access code
-                  </p>
-                </div>
-              )}
-
-              {(role === "faculty" || role === "super_admin") && (
-                <div>
-                  <label className="block text-sm font-medium mb-2">
-                    Domain(s)
-                  </label>
-                  <Input
-                    type="text"
-                    placeholder="e.g. AI, Web Dev, CyberSec"
-                    value={domains}
-                    onChange={(e) => setDomains(e.target.value)}
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Enter your areas of expertise, separated by commas
-                  </p>
-                </div>
-              )}
 
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "Creating profile..." : "Complete Setup"}

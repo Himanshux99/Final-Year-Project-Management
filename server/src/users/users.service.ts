@@ -11,9 +11,17 @@ export class UsersService {
     });
   }
 
+  async updatePassword(id: string, hashedPassword: string) {
+    return this.prisma.user.update({
+      where: { id },
+      data: { password: hashedPassword },
+    });
+  }
+
   async findByEmail(email: string) {
-    return this.prisma.user.findUnique({
-      where: { email },
+    // Case-insensitive so existing mixed-case accounts keep working
+    return this.prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
     });
   }
 

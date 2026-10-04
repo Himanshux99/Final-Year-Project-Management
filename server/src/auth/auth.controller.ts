@@ -3,6 +3,7 @@ import { Request as ExpressRequest } from 'express';
 import { AuthService } from './auth.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @Controller('auth')
@@ -17,6 +18,12 @@ export class AuthController {
   @Post('login')
   async login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('change-password')
+  async changePassword(@Request() req: ExpressRequest, @Body() dto: ChangePasswordDto) {
+    return this.authService.changePassword(req.user.userId, dto);
   }
 
   @UseGuards(JwtAuthGuard)
