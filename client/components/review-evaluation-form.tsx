@@ -12,6 +12,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Label } from "./ui/label";
+import { FormSkeleton } from "./ui/skeleton";
 import { Select } from "./ui/select";
 import {
   Dialog,
@@ -281,10 +282,7 @@ export function ReviewEvaluationForm({
         </DialogHeader>
 
         {loading ? (
-          <div className="py-12 text-center">
-            <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
-            <p className="text-gray-500">Loading form data...</p>
-          </div>
+          <FormSkeleton fields={6} />
         ) : error && !prefillData ? (
           <div className="py-8 text-center">
             <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-2" />

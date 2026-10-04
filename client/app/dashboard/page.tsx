@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { PageSkeleton } from "@/components/ui/skeleton";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -36,11 +37,6 @@ export default function DashboardPage() {
     }
   }, [user, profile, loading, router]);
 
-  return (
-    <div className="min-h-screen bg-white flex items-center justify-center">
-      <span className="ml-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-400 border-t-transparent"></span>
-      <p className="text-gray-600">Loading...</p>
-    </div>
-  );
+  return <PageSkeleton />;
 }
 

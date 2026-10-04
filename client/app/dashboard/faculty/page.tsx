@@ -6,7 +6,6 @@ import {
   Users,
   Check,
   X,
-  ClipboardList,
   Eye,
   RefreshCw,
   Filter,
@@ -14,7 +13,6 @@ import {
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   StatCardSkeleton,
   ListSkeleton,
@@ -346,41 +344,167 @@ export default function FacultyDashboard() {
     return teamProgress.filter((tp) => filteredGroupIds.has(tp.groupId));
   }, [teamProgress, filteredAcceptedTeams, semesterFilter]);
 
-  return (
-    <DashboardLayout title="Faculty Dashboard">
-      <div className="max-w-4xl mx-auto space-y-6">
-        {/* Navigation for Super Admins */}
-        {profile?.role === "super_admin" && (
-          <div className="flex justify-end">
-            <Button
-              variant="outline"
-              onClick={() => router.push("/dashboard/admin")}
-              size="sm"
-            >
-              Back to Admin Dashboard
-            </Button>
-          </div>
-        )}
+  const progressByGroup = React.useMemo(() => {
+    const map = new Map<string, TeamProgress>();
+    teamProgress.forEach((tp) => map.set(tp.groupId, tp));
+    return map;
+  }, [teamProgress]);
 
-        {/* Refresh Button */}
-        <div className="flex justify-end">
-          <Button
-            variant="outline"
-            onClick={handleRefresh}
-            size="sm"
-            disabled={refreshing}
+  const firstName = profile?.name?.split(" ")[0] || "";
+
+  const stats = [
+    { label: "Active teams", value: acceptedTeams.length, tone: "text-gray-900" },
+    {
+      label: "Awaiting your reply",
+      value: pendingRequests.length,
+      tone: pendingRequests.length > 0 ? "text-amber-600" : "text-gray-900",
+    },
+    { label: "Declined", value: rejectedRequests.length, tone: "text-gray-900" },
+    { label: "Total requests", value: allocations.length, tone: "text-gray-900" },
+  ];
+
+  const renderMembers = (members?: Profile[]) => (
+    <div className="flex flex-wrap gap-2">
+      {members?.map((member) => (
+        <span
+          key={member.id}
+          className="inline-flex items-center gap-2 rounded-full bg-gray-100 py-1 pl-1 pr-3 text-sm text-gray-700"
+        >
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-700">
+            {member.name?.charAt(0).toUpperCase()}
+          </span>
+          {member.name}
+          <span className="text-xs text-gray-500">{member.rollNumber}</span>
+        </span>
+      ))}
+    </div>
+  );
+
+  const renderStage = (
+    label: string,
+    stage: { status: string; progressPercentage?: number; isRolledOut: boolean },
+  ) => {
+    const done = stage.status === "completed";
+    const started = stage.status !== "not_started";
+    const locked = !stage.isRolledOut && !started;
+    const pct = done ? 100 : stage.progressPercentage || 0;
+    return (
+      <div key={label} className="min-w-0">
+        <div className="mb-1 flex items-center justify-between text-xs">
+          <span className="font-medium text-gray-700">{label}</span>
+          <span
+            className={
+              done
+                ? "font-medium text-green-700"
+                : locked
+                  ? "text-gray-400"
+                  : "text-gray-500"
+            }
           >
-            <RefreshCw
-              className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`}
-            />
-            Refresh
+            {done ? "Done" : locked ? "Not open" : `${pct}%`}
+          </span>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-gray-100">
+          <div
+            className={`h-full rounded-full transition-all ${done ? "bg-green-500" : "bg-indigo-500"}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  const renderRequestCard = (
+    allocation: AllocationWithDetails,
+    actionable: boolean,
+  ) => (
+    <div
+      key={allocation.id}
+      className={`rounded-xl border bg-white p-4 ${actionable ? "border-amber-200" : "border-gray-200"}`}
+    >
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="text-base font-semibold text-gray-900">
+            {allocation.group?.groupId || "Unknown group"}
+          </h3>
+          <p className="text-sm text-gray-500">
+            Team code {allocation.group?.teamCode}
+          </p>
+        </div>
+        <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
+          {getPreferenceLabel(allocation.preferenceRank)}
+        </span>
+      </div>
+      {renderMembers(allocation.members)}
+      {actionable && (
+        <div className="mt-4 flex gap-2">
+          <Button
+            onClick={() => handleAccept(allocation.id)}
+            disabled={loading}
+            size="sm"
+            className="flex-1 sm:flex-none"
+          >
+            <Check className="mr-2 h-4 w-4" />
+            Accept team
+          </Button>
+          <Button
+            onClick={() => handleReject(allocation.id)}
+            disabled={loading}
+            variant="outline"
+            size="sm"
+            className="flex-1 sm:flex-none"
+          >
+            <X className="mr-2 h-4 w-4" />
+            Decline
           </Button>
         </div>
+      )}
+    </div>
+  );
 
-        {/* Loading Skeleton */}
+  return (
+    <DashboardLayout title="Faculty Dashboard">
+      <div className="mx-auto max-w-5xl space-y-8">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-2xl font-semibold text-gray-900">
+              {firstName ? `Welcome back, ${firstName}` : "Welcome back"}
+            </h2>
+            <p className="text-sm text-gray-500">
+              {initialLoading
+                ? "Loading your teams..."
+                : pendingRequests.length > 0
+                  ? `${pendingRequests.length} team${pendingRequests.length > 1 ? "s are" : " is"} waiting for your reply.`
+                  : "No requests are waiting for your reply."}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            {profile?.role === "super_admin" && (
+              <Button
+                variant="outline"
+                onClick={() => router.push("/dashboard/admin")}
+                size="sm"
+              >
+                Admin dashboard
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              onClick={handleRefresh}
+              size="sm"
+              disabled={refreshing}
+            >
+              <RefreshCw
+                className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+              />
+              Refresh
+            </Button>
+          </div>
+        </div>
+
         {initialLoading ? (
           <div className="space-y-6">
-            <div className="grid md:grid-cols-3 gap-4">
+            <div className="grid gap-4 md:grid-cols-3">
               <StatCardSkeleton />
               <StatCardSkeleton />
               <StatCardSkeleton />
@@ -393,458 +517,140 @@ export default function FacultyDashboard() {
           </div>
         ) : (
           <>
-            {/* Summary Stats */}
-            <div className="grid md:grid-cols-4 gap-4">
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-center">
-                    <p className="text-3xl font-bold text-green-600">
-                      {acceptedTeams.length}
-                    </p>
-                    <p className="text-sm text-gray-600 mt-1">My Teams</p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-center">
-                    <p className="text-3xl font-bold text-amber-600">
-                      {pendingRequests.length}
-                    </p>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Pending Requests
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-center">
-                    <p className="text-3xl font-bold text-red-600">
-                      {rejectedRequests.length}
-                    </p>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Rejected Requests
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-center">
-                    <p className="text-3xl font-bold text-gray-900">
-                      {allocations.length}
-                    </p>
-                    <p className="text-sm text-gray-600 mt-1">Total Requests</p>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+            <dl className="grid grid-cols-2 overflow-hidden rounded-xl border border-gray-200 bg-white md:grid-cols-4 md:divide-x md:divide-gray-200">
+              {stats.map((s) => (
+                <div key={s.label} className="px-5 py-4">
+                  <dd className={`text-3xl font-semibold ${s.tone}`}>
+                    {s.value}
+                  </dd>
+                  <dt className="mt-1 text-sm text-gray-500">{s.label}</dt>
+                </div>
+              ))}
+            </dl>
 
-            {/* My Teams Section */}
-            {acceptedTeams.length > 0 && (
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <CardTitle>My Teams</CardTitle>
-                  {availableSemesters.length > 0 && (
-                    <div className="flex items-center gap-2">
-                      <Filter className="h-4 w-4 text-gray-500" />
-                      <select
-                        value={semesterFilter ?? ""}
-                        onChange={(e) =>
-                          setSemesterFilter(
-                            e.target.value ? parseInt(e.target.value) : null,
-                          )
-                        }
-                        className="border rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                      >
-                        <option value="">All Semesters</option>
-                        {availableSemesters.map((sem) => (
-                          <option key={sem} value={sem}>
-                            Semester {sem}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {filteredAcceptedTeams.length === 0 ? (
-                      <p className="text-center text-gray-500 py-4">
-                        No teams found for Semester {semesterFilter}
-                      </p>
-                    ) : (
-                      filteredAcceptedTeams.map((allocation) => (
-                        <div
-                          key={allocation.id}
-                          className="border-2 border-green-200 bg-green-50 rounded-lg p-4"
-                        >
-                          <div className="flex items-start justify-between mb-3">
-                            <div>
-                              <h3 className="font-semibold text-lg">
-                                {allocation.group?.groupId || "Unknown Group"}
-                              </h3>
-                              <p className="text-sm text-gray-600">
-                                Team Code: {allocation.group?.teamCode}
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <span className="inline-block px-3 py-1 rounded-full text-xs font-medium border bg-green-100 text-green-800 border-green-200">
-                                <Check className="h-3 w-3 inline mr-1" />
-                                Accepted
-                              </span>
-                              <p className="text-xs text-gray-600 mt-1">
-                                {getPreferenceLabel(allocation.preferenceRank)}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div>
-                            <p className="text-sm font-medium text-gray-700 mb-2">
-                              Team Members:
-                            </p>
-                            <div className="space-y-1">
-                              {allocation.members?.map((member) => (
-                                <div
-                                  key={member.id}
-                                  className="text-sm text-gray-600"
-                                >
-                                  • {member.name} ({member.rollNumber})
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+            {pendingRequests.length > 0 && (
+              <section className="space-y-3">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Needs your reply ({pendingRequests.length})
+                </h3>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {pendingRequests.map((a) => renderRequestCard(a, true))}
+                </div>
+              </section>
             )}
 
-            {/* Project Progress Section */}
-            {filteredTeamProgress.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <ClipboardList className="h-5 w-5" />
-                    Project Progress
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {filteredTeamProgress.map((team) => (
+            <section className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  My teams
+                </h3>
+                {availableSemesters.length > 0 && (
+                  <label className="flex items-center gap-2 text-sm text-gray-600">
+                    <Filter className="h-4 w-4" />
+                    <span className="sr-only">Filter by semester</span>
+                    <select
+                      value={semesterFilter ?? ""}
+                      onChange={(e) =>
+                        setSemesterFilter(
+                          e.target.value ? parseInt(e.target.value) : null,
+                        )
+                      }
+                      className="rounded-md border bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">All semesters</option>
+                      {availableSemesters.map((sem) => (
+                        <option key={sem} value={sem}>
+                          Semester {sem}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+
+              {acceptedTeams.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-300 bg-white py-10 text-center">
+                  <Users className="mx-auto mb-3 h-10 w-10 text-gray-400" />
+                  <p className="font-medium text-gray-800">No teams yet</p>
+                  <p className="text-sm text-gray-500">
+                    {allocations.length === 0
+                      ? "Teams appear here once students choose you as a mentor."
+                      : "Accept a request to start mentoring a team."}
+                  </p>
+                </div>
+              ) : filteredAcceptedTeams.length === 0 ? (
+                <p className="rounded-xl border border-gray-200 bg-white py-8 text-center text-gray-500">
+                  No teams in semester {semesterFilter}.
+                </p>
+              ) : (
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {filteredAcceptedTeams.map((allocation) => {
+                    const tp = allocation.group
+                      ? progressByGroup.get(allocation.group.id)
+                      : undefined;
+                    const topic = tp?.topicApproval;
+                    return (
                       <div
-                        key={team.groupId}
-                        className="border border-gray-200 rounded-lg p-4 hover:border-primary/50 transition-colors"
+                        key={allocation.id}
+                        className="flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-4 transition-colors hover:border-indigo-300"
                       >
-                        <div className="flex items-center justify-between mb-3">
-                          <div>
-                            <h4 className="font-semibold">
-                              {team.groupDisplayId}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <h4 className="font-semibold text-gray-900">
+                              {allocation.group?.groupId || "Unknown group"}
                             </h4>
-                            {team.topicApproval.approvedTopic && (
-                              <p className="text-sm text-gray-600 truncate max-w-[300px]">
-                                {team.topicApproval.approvedTopic}
-                              </p>
-                            )}
+                            <p
+                              className={`truncate text-sm ${topic?.approvedTopic ? "text-gray-700" : "text-gray-400"}`}
+                              title={topic?.approvedTopic}
+                            >
+                              {topic?.approvedTopic ||
+                                (topic && topic.totalTopicsSubmitted > 0
+                                  ? `${topic.totalTopicsSubmitted} topic${topic.totalTopicsSubmitted > 1 ? "s" : ""} awaiting approval`
+                                  : "No topic submitted yet")}
+                            </p>
                           </div>
-
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => openTeamDialog(team)}
-                            className="gap-1"
-                          >
-                            <Eye className="h-4 w-4" />
-                            View
-                          </Button>
+                          {tp && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openTeamDialog(tp)}
+                              className="shrink-0 gap-1"
+                            >
+                              <Eye className="h-4 w-4" />
+                              Open
+                            </Button>
+                          )}
                         </div>
 
-                        {/* Progress Indicators */}
-                        <div className="grid grid-cols-4 gap-2">
-                          <div className="text-center">
-                            <Badge
-                              variant={
-                                team.topicApproval.status === "approved"
-                                  ? "success"
-                                  : team.topicApproval.totalTopicsSubmitted > 0
-                                    ? "warning"
-                                    : "outline"
-                              }
-                              className="text-xs"
-                            >
-                              Topic
-                            </Badge>
-                            <p className="text-xs text-gray-500 mt-1">
-                              {team.topicApproval.status === "approved"
-                                ? "✓"
-                                : team.topicApproval.totalTopicsSubmitted > 0
-                                  ? `${team.topicApproval.totalTopicsSubmitted} pending`
-                                  : "—"}
-                            </p>
+                        {renderMembers(allocation.members)}
+
+                        {tp && (
+                          <div className="grid grid-cols-3 gap-3 border-t border-gray-100 pt-3">
+                            {renderStage("Review 1", tp.review1)}
+                            {renderStage("Review 2", tp.review2)}
+                            {renderStage("Final", tp.finalReview)}
                           </div>
-                          <div className="text-center">
-                            <Badge
-                              variant={
-                                team.review1.status === "completed"
-                                  ? "success"
-                                  : team.review1.status !== "not_started"
-                                    ? "warning"
-                                    : "outline"
-                              }
-                              className="text-xs"
-                            >
-                              R1
-                            </Badge>
-                            <p className="text-xs text-gray-500 mt-1">
-                              {team.review1.status === "completed"
-                                ? "✓"
-                                : team.review1.progressPercentage
-                                  ? `${team.review1.progressPercentage}%`
-                                  : team.review1.isRolledOut
-                                    ? "0%"
-                                    : "🔒"}
-                            </p>
-                          </div>
-                          <div className="text-center">
-                            <Badge
-                              variant={
-                                team.review2.status === "completed"
-                                  ? "success"
-                                  : team.review2.status !== "not_started"
-                                    ? "warning"
-                                    : "outline"
-                              }
-                              className="text-xs"
-                            >
-                              R2
-                            </Badge>
-                            <p className="text-xs text-gray-500 mt-1">
-                              {team.review2.status === "completed"
-                                ? "✓"
-                                : team.review2.progressPercentage
-                                  ? `${team.review2.progressPercentage}%`
-                                  : team.review2.isRolledOut
-                                    ? "0%"
-                                    : "🔒"}
-                            </p>
-                          </div>
-                          <div className="text-center">
-                            <Badge
-                              variant={
-                                team.finalReview.status === "completed"
-                                  ? "success"
-                                  : team.finalReview.status !== "not_started"
-                                    ? "warning"
-                                    : "outline"
-                              }
-                              className="text-xs"
-                            >
-                              Final
-                            </Badge>
-                            <p className="text-xs text-gray-500 mt-1">
-                              {team.finalReview.status === "completed"
-                                ? "✓"
-                                : team.finalReview.progressPercentage
-                                  ? `${team.finalReview.progressPercentage}%`
-                                  : team.finalReview.isRolledOut
-                                    ? "0%"
-                                    : "🔒"}
-                            </p>
-                          </div>
-                        </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {waitingRequests.length > 0 && (
+              <details className="rounded-xl border border-gray-200 bg-white">
+                <summary className="cursor-pointer select-none px-4 py-3 font-medium text-gray-800">
+                  Unavailable requests ({waitingRequests.length})
+                  <span className="ml-2 text-sm font-normal text-gray-500">
+                    These teams were placed with another mentor.
+                  </span>
+                </summary>
+                <div className="grid gap-3 border-t border-gray-100 p-4 lg:grid-cols-2">
+                  {waitingRequests.map((a) => renderRequestCard(a, false))}
+                </div>
+              </details>
             )}
-
-            {/* Pending Requests Section */}
-            <Card>
-              <CardHeader>
-                <CardTitle>
-                  Pending Requests{" "}
-                  {pendingRequests.length > 0 && `(${pendingRequests.length})`}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {pendingRequests.length === 0 ? (
-                  <div className="text-center py-8 text-gray-600">
-                    <Users className="h-12 w-12 mx-auto mb-3 text-gray-400" />
-                    <p>
-                      {allocations.length === 0
-                        ? "No teams have selected you as a mentor yet"
-                        : "No pending requests"}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {pendingRequests.map((allocation) => (
-                      <div
-                        key={allocation.id}
-                        className="border border-gray-200 rounded-lg p-4"
-                      >
-                        <div className="flex items-start justify-between mb-3">
-                          <div>
-                            <h3 className="font-semibold text-lg">
-                              {allocation.group?.groupId || "Unknown Group"}
-                            </h3>
-                            <p className="text-sm text-gray-600">
-                              Team Code: {allocation.group?.teamCode}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <span
-                              className={`inline-block px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(
-                                allocation.status,
-                              )}`}
-                            >
-                              {allocation.status.charAt(0).toUpperCase() +
-                                allocation.status.slice(1)}
-                            </span>
-                            <p className="text-xs text-gray-600 mt-1">
-                              {getPreferenceLabel(allocation.preferenceRank)}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="mb-4">
-                          <p className="text-sm font-medium text-gray-700 mb-2">
-                            Team Members:
-                          </p>
-                          <div className="space-y-1">
-                            {allocation.members?.map((member) => (
-                              <div
-                                key={member.id}
-                                className="text-sm text-gray-600"
-                              >
-                                • {member.name} ({member.rollNumber})
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="flex gap-2">
-                          <Button
-                            onClick={() => handleAccept(allocation.id)}
-                            disabled={loading}
-                            size="sm"
-                            className="flex-1"
-                          >
-                            <Check className="h-4 w-4 mr-2" />
-                            Accept Team
-                          </Button>
-                          <Button
-                            onClick={() => handleReject(allocation.id)}
-                            disabled={loading}
-                            variant="outline"
-                            size="sm"
-                            className="flex-1"
-                          >
-                            <X className="h-4 w-4 mr-2" />
-                            Reject
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>
-                  Unavailable Requests{" "}
-                  {waitingRequests.length > 0 && `(${waitingRequests.length})`}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {waitingRequests.length === 0 ? (
-                  <div className="text-center py-8 text-gray-600">
-                    <Users className="h-12 w-12 mx-auto mb-3 text-gray-400" />
-                    <p>
-                      {allocations.length === 0
-                        ? "No teams have selected you as a mentor yet"
-                        : "No unavailable requests"}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {waitingRequests.map((allocation) => (
-                      <div
-                        key={allocation.id}
-                        className="border border-gray-200 rounded-lg p-4"
-                      >
-                        <div className="flex items-start justify-between mb-3">
-                          <div>
-                            <h3 className="font-semibold text-lg">
-                              {allocation.group?.groupId || "Unknown Group"}
-                            </h3>
-                            <p className="text-sm text-gray-600">
-                              Team Code: {allocation.group?.teamCode}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <span
-                              className={`inline-block px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(
-                                allocation.status,
-                              )}`}
-                            >
-                              {allocation.status.charAt(0).toUpperCase() +
-                                allocation.status.slice(1)}
-                            </span>
-                            <p className="text-xs text-gray-600 mt-1">
-                              {getPreferenceLabel(allocation.preferenceRank)}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="mb-4">
-                          <p className="text-sm font-medium text-gray-700 mb-2">
-                            Team Members:
-                          </p>
-                          <div className="space-y-1">
-                            {allocation.members?.map((member) => (
-                              <div
-                                key={member.id}
-                                className="text-sm text-gray-600"
-                              >
-                                • {member.name} ({member.rollNumber})
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* <div className="flex gap-2">
-                      <Button
-                        onClick={() => handleAccept(allocation.id)}
-                        disabled={loading}
-                        size="sm"
-                        className="flex-1"
-                      >
-                        <Check className="h-4 w-4 mr-2" />
-                        Accept Team
-                      </Button>
-                      <Button
-                        onClick={() => handleReject(allocation.id)}
-                        disabled={loading}
-                        variant="outline"
-                        size="sm"
-                        className="flex-1"
-                      >
-                        <X className="h-4 w-4 mr-2" />
-                        Reject
-                      </Button>
-                    </div> */}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
           </>
         )}
       </div>

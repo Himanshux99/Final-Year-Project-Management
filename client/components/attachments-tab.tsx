@@ -16,6 +16,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
+import { ListSkeleton } from "./ui/skeleton";
 import { Attachment, MAX_ATTACHMENTS_PER_GROUP, MAX_FILE_SIZE_MB } from "@/types";
 
 interface AttachmentsTabProps {
@@ -116,11 +117,8 @@ export function AttachmentsTab({
   if (loading) {
     return (
       <Card>
-        <CardContent className="py-12">
-          <div className="text-center text-gray-500">
-            <Clock className="h-8 w-8 mx-auto mb-2 animate-pulse" />
-            <p>Loading attachments...</p>
-          </div>
+        <CardContent className="py-6">
+          <ListSkeleton items={2} />
         </CardContent>
       </Card>
     );
