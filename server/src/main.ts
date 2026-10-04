@@ -6,15 +6,21 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Browsers send the Origin header without a trailing slash and in lower case, so
+  // normalise configured values the same way (e.g. "https://app.vercel.app/" in an
+  // env var would otherwise never match).
+  const normalizeOrigin = (origin: string) =>
+    origin.trim().replace(/\/+$/, '').toLowerCase();
+
   const configuredOrigins = (process.env.CORS_ORIGINS || '')
     .split(',')
-    .map((origin) => origin.trim())
+    .map(normalizeOrigin)
     .filter(Boolean);
 
   const allowedOrigins = new Set<string>([
     'http://localhost:3000',
     'http://127.0.0.1:3000',
-    'https://projectxhub.vercel.app',
+    'https://final-year-project-management-six.vercel.app',
     ...configuredOrigins,
   ]);
 
@@ -28,12 +34,15 @@ async function bootstrap() {
         return;
       }
 
-      if (allowedOrigins.has(origin)) {
+      if (allowedOrigins.has(normalizeOrigin(origin))) {
         callback(null, true);
         return;
       }
 
-      callback(new Error(`CORS blocked for origin: ${origin}`), false);
+      // Reject without throwing, so the response is a normal one (just without
+      // CORS headers) instead of a 500 from the error handler.
+      console.warn(`CORS blocked for origin: ${origin}`);
+      callback(null, false);
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
