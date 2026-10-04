@@ -12,6 +12,10 @@ import {
   AlertCircle,
   FileText,
   Download,
+  Pencil,
+  Lightbulb,
+  Upload,
+  X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
@@ -27,8 +31,8 @@ import {
   DialogDescription,
   DialogFooter,
 } from "./ui/dialog";
+import { DomainChips } from "./domain-chips";
 import { ProjectTopic, TopicStatus, TopicMessage, Domain } from "@/types";
-import { Select } from "./ui/select";
 
 interface TopicApprovalSectionProps {
   topics: ProjectTopic[];
@@ -42,14 +46,14 @@ interface TopicApprovalSectionProps {
   onSubmitTopic: (
     title: string,
     description: string,
-    domainId: string,
+    domainIds: string[],
     file?: File,
   ) => void;
   onUpdateTopic: (
     topicId: string,
     title: string,
     description: string,
-    domainId: string,
+    domainIds: string[],
     file?: File,
   ) => void;
   onApproveTopic: (topicId: string) => void;
@@ -60,6 +64,10 @@ interface TopicApprovalSectionProps {
   meetLink?: string;
   onSetMeetLink?: (link: string) => void;
 }
+
+const TITLE_MAX = 120;
+const DESCRIPTION_MAX = 1000;
+const MAX_DOC_BYTES = 10 * 1024 * 1024;
 
 function getStatusConfig(status: TopicStatus) {
   switch (status) {
@@ -120,7 +128,7 @@ export function TopicApprovalSection({
   const [showAddTopic, setShowAddTopic] = React.useState(false);
   const [newTopicTitle, setNewTopicTitle] = React.useState("");
   const [newTopicDescription, setNewTopicDescription] = React.useState("");
-  const [newTopicDomainId, setNewTopicDomainId] = React.useState("");
+  const [newTopicDomainIds, setNewTopicDomainIds] = React.useState<string[]>([]);
   const [newTopicFile, setNewTopicFile] = React.useState<File | null>(null);
   const [expandedTopic, setExpandedTopic] = React.useState<string | null>(null);
   const [showRevisionDialog, setShowRevisionDialog] = React.useState(false);
@@ -132,11 +140,29 @@ export function TopicApprovalSection({
     null,
   );
 
+  const [fileError, setFileError] = React.useState<string | null>(null);
+
+  const closeTopicDialog = () => {
+    setShowAddTopic(false);
+    setEditingTopic(null);
+    setNewTopicTitle("");
+    setNewTopicDescription("");
+    setNewTopicDomainIds([]);
+    setNewTopicFile(null);
+    setFileError(null);
+  };
+
+  const openNewTopicDialog = () => {
+    closeTopicDialog();
+    setShowAddTopic(true);
+  };
+
   const approvedTopic = topics.find((t) => t.status === "approved");
+  const activeTopicCount = topics.filter((t) => t.status !== "rejected").length;
   const canAddMoreTopics =
     currentUserRole === "student" &&
     !approvedTopic &&
-    topics.filter((t) => t.status !== "rejected").length < maxTopics;
+    activeTopicCount < maxTopics;
 
   // Convert TopicMessages to ThreadMessages for the panel
   const threadMessages: ThreadMessage[] = messages.map((m) => ({
@@ -150,31 +176,25 @@ export function TopicApprovalSection({
   }));
 
   const handleSubmitTopic = () => {
-    if (newTopicTitle.trim() && newTopicDescription.trim() && newTopicDomainId) {
+    if (newTopicTitle.trim() && newTopicDescription.trim() && newTopicDomainIds.length > 0) {
       if (editingTopic) {
-        // console.log("Updating topic:", editingTopic.title, newTopicDescription, newTopicFile);
         onUpdateTopic(
           editingTopic.id,
           newTopicTitle.trim(),
           newTopicDescription.trim(),
-          newTopicDomainId,
+          newTopicDomainIds,
           newTopicFile || undefined,
         );
       } else {
         onSubmitTopic(
           newTopicTitle.trim(),
           newTopicDescription.trim(),
-          newTopicDomainId,
+          newTopicDomainIds,
           newTopicFile || undefined,
         );
       }
 
-      setEditingTopic(null);
-      setNewTopicTitle("");
-      setNewTopicDescription("");
-      setNewTopicDomainId("");
-      setNewTopicFile(null);
-      setShowAddTopic(false);
+      closeTopicDialog();
     }
   };
 
@@ -183,7 +203,12 @@ export function TopicApprovalSection({
 
     setNewTopicTitle(topic.title);
     setNewTopicDescription(topic.description);
-    setNewTopicDomainId(topic.domainId || "");
+    // Skip domains the admin has since deactivated; they can't be re-submitted.
+    setNewTopicDomainIds(
+      (topic.domains ?? [])
+        .map((d) => d.id)
+        .filter((id) => domains.some((active) => active.id === id)),
+    );
     setNewTopicFile(null);
 
     setShowAddTopic(true);
@@ -217,34 +242,69 @@ export function TopicApprovalSection({
     <div className="space-y-4">
       {/* Status Banner */}
       {approvedTopic ? (
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <div className="flex items-center gap-2 text-green-800">
-            <CheckCircle className="h-5 w-5" />
-            <span className="font-medium">Topic Approved!</span>
+        <div className="rounded-xl border border-green-200 bg-gradient-to-br from-green-50 to-emerald-50 p-5">
+          <div className="flex items-start gap-3">
+            <div className="rounded-full bg-green-100 p-2 text-green-700">
+              <CheckCircle className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold uppercase tracking-wide text-green-700">
+                Approved project topic
+              </p>
+              <h3 className="mt-0.5 text-lg font-semibold text-green-900">
+                {approvedTopic.title}
+              </h3>
+              {approvedTopic.domains && approvedTopic.domains.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {approvedTopic.domains.map((d) => (
+                    <Badge key={d.id} variant="success">
+                      {d.name}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+              <p className="mt-2 whitespace-pre-wrap text-sm text-green-800/90">
+                {approvedTopic.description}
+              </p>
+            </div>
           </div>
-          <p className="mt-1 text-green-700 font-semibold">
-            {approvedTopic.title}
-            {approvedTopic.domain && (
-              <span className="ml-2 text-xs font-normal text-green-700/80">
-                ({approvedTopic.domain.name})
-              </span>
-            )}
-          </p>
-          <p className="mt-1 text-sm text-green-600">
-            {approvedTopic.description}
-          </p>
         </div>
       ) : (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-          <div className="flex items-center gap-2 text-amber-800">
-            <Clock className="h-5 w-5" />
-            <span className="font-medium">Topic Pending Approval</span>
+        <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-yellow-50 p-5">
+          <div className="flex items-start gap-3">
+            <div className="rounded-full bg-amber-100 p-2 text-amber-700">
+              <Lightbulb className="h-5 w-5" />
+            </div>
+            <div className="flex-1">
+              <p className="font-semibold text-amber-900">
+                Topic pending approval
+              </p>
+              <p className="mt-0.5 text-sm text-amber-800">
+                {currentUserRole === "student"
+                  ? `Submit up to ${maxTopics} topic ideas. Your mentor will approve one for your project.`
+                  : "Review the submitted topics and approve one for this team's project."}
+              </p>
+              {currentUserRole === "student" && (
+                <div className="mt-3 flex items-center gap-2">
+                  <div className="flex gap-1.5" aria-hidden="true">
+                    {Array.from({ length: maxTopics }).map((_, i) => (
+                      <span
+                        key={i}
+                        className={`h-2 w-8 rounded-full ${
+                          i < activeTopicCount ? "bg-amber-500" : "bg-amber-200"
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-xs font-medium text-amber-800">
+                    {activeTopicCount} of {maxTopics} slots used
+                    {topics.length > activeTopicCount &&
+                      " (rejected topics do not count)"}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
-          <p className="mt-1 text-sm text-amber-700">
-            {currentUserRole === "student"
-              ? `Submit up to ${maxTopics} topics for your mentor to review. Your mentor will approve one topic for your project.`
-              : "Review the submitted topics and approve one for this team's project."}
-          </p>
         </div>
       )}
 
@@ -256,7 +316,7 @@ export function TopicApprovalSection({
             {canAddMoreTopics && (
               <Button
                 size="sm"
-                onClick={() => setShowAddTopic(true)}
+                onClick={openNewTopicDialog}
                 className="gap-1"
               >
                 <Plus className="h-4 w-4" />
@@ -267,15 +327,20 @@ export function TopicApprovalSection({
         </CardHeader>
         <CardContent>
           {topics.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p>No topics submitted yet.</p>
+            <div className="rounded-lg border border-dashed border-gray-300 py-10 text-center text-gray-500">
+              <Lightbulb className="mx-auto mb-2 h-8 w-8 text-gray-300" />
+              <p className="font-medium text-gray-700">No topics submitted yet.</p>
+              <p className="mt-0.5 text-sm">
+                {currentUserRole === "student"
+                  ? "Pitch your best project ideas to your mentor."
+                  : "The team has not submitted any topics yet."}
+              </p>
               {canAddMoreTopics && (
                 <Button
                   variant="outline"
                   size="sm"
                   className="mt-3"
-                  onClick={() => setShowAddTopic(true)}
+                  onClick={openNewTopicDialog}
                 >
                   Submit your first topic
                 </Button>
@@ -302,7 +367,7 @@ export function TopicApprovalSection({
                   return (
                     <div
                       key={topic.id}
-                      className={`border rounded-lg overflow-hidden ${
+                      className={`border rounded-xl overflow-hidden shadow-sm ${
                         topic.status === "approved"
                           ? "border-green-300 bg-green-50/50"
                           : topic.status === "rejected"
@@ -312,58 +377,91 @@ export function TopicApprovalSection({
                     >
                       {/* Topic Header */}
                       <div
-                        className="flex items-start justify-between p-3 cursor-pointer hover:bg-gray-50/50"
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={isExpanded}
+                        className="flex cursor-pointer items-start gap-3 p-4 transition-colors hover:bg-gray-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
                         onClick={() =>
                           setExpandedTopic(isExpanded ? null : topic.id)
                         }
+                        onKeyDown={(e) => {
+                          if (e.target !== e.currentTarget) return;
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setExpandedTopic(isExpanded ? null : topic.id);
+                          }
+                        }}
                       >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-gray-500">
-                              #{topicNumber}
-                            </span>
-                            <h4 className="font-medium text-gray-900 truncate">
+                        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-xs font-semibold text-indigo-700">
+                          {topicNumber}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <h4 className="break-words font-medium text-gray-900">
                               {topic.title}
                             </h4>
-                            {topic.domain && (
-                              <Badge variant="outline" className="shrink-0">
-                                {topic.domain.name}
-                              </Badge>
-                            )}
+                            {currentUserRole === "faculty" &&
+                              topic.lastEditedAt &&
+                              topic.status !== "approved" &&
+                              topic.status !== "rejected" && (
+                                <Badge
+                                  variant="warning"
+                                  className="shrink-0"
+                                  title={`Edited ${new Date(topic.lastEditedAt).toLocaleString()}`}
+                                >
+                                  Updated by student
+                                </Badge>
+                              )}
                           </div>
+                          {topic.domains && topic.domains.length > 0 && (
+                            <div className="mt-1.5 flex flex-wrap gap-1.5">
+                              {topic.domains.map((d) => (
+                                <span
+                                  key={d.id}
+                                  className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700"
+                                >
+                                  {d.name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                           {!isExpanded && (
-                            <p className="text-sm text-gray-600 truncate mt-1">
+                            <p className="mt-1.5 line-clamp-2 text-sm text-gray-600">
                               {topic.description}
                             </p>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 ml-2">
+                        <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
                           <Badge variant={statusConfig.variant}>
-                            <StatusIcon className="h-3 w-3 mr-1" />
+                            <StatusIcon className="mr-1 h-3 w-3" />
                             {statusConfig.label}
                           </Badge>
+                          {currentUserRole === "student" &&
+                            topic.status !== "approved" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-1"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleEditTopic(topic);
+                                }}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                                Edit
+                              </Button>
+                            )}
                           {isExpanded ? (
-                            <ChevronUp className="h-4 w-4 text-gray-400" />
+                            <ChevronUp className="hidden h-4 w-4 text-gray-400 sm:block" />
                           ) : (
-                            <ChevronDown className="h-4 w-4 text-gray-400" />
+                            <ChevronDown className="hidden h-4 w-4 text-gray-400 sm:block" />
                           )}
                         </div>
-                        {currentUserRole === "student"?<Button
-                          size="sm"
-                          variant="outline"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleEditTopic(topic);
-                          }}
-                        >
-                          Edit
-                        </Button>:null}
-                        
                       </div>
 
                       {/* Expanded Content */}
                       {isExpanded && (
-                        <div className="px-3 pb-3 border-t border-gray-100">
+                        <div className="border-t border-gray-100 px-4 pb-4">
                           <p className="text-sm text-gray-700 mt-3 whitespace-pre-wrap">
                             {topic.description}
                           </p>
@@ -483,82 +581,140 @@ export function TopicApprovalSection({
       </Card>
 
       {/* Add Topic Dialog */}
-      <Dialog open={showAddTopic} onOpenChange={setShowAddTopic}>
+      <Dialog
+        open={showAddTopic}
+        onOpenChange={(open) =>
+          open ? setShowAddTopic(true) : closeTopicDialog()
+        }
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
               {editingTopic ? "Update Topic" : "Submit Topic"}
             </DialogTitle>
             <DialogDescription>
-              Provide a clear title and detailed description for your project
-              topic.
+              {editingTopic
+                ? "Your mentor will be notified of the changes."
+                : "A clear title and a concrete description help your mentor decide faster."}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-5 py-4">
             <div>
-              <label className="text-sm font-medium text-gray-700">
-                Topic Title
-              </label>
+              <div className="flex items-baseline justify-between">
+                <label className="text-sm font-medium text-gray-700">
+                  Topic title
+                </label>
+                <span className="text-xs text-gray-400">
+                  {newTopicTitle.length}/{TITLE_MAX}
+                </span>
+              </div>
               <Input
                 value={newTopicTitle}
+                maxLength={TITLE_MAX}
                 onChange={(e) => setNewTopicTitle(e.target.value)}
                 placeholder="e.g., AI-Powered Student Attendance System"
                 className="mt-1"
+                autoFocus
               />
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-700">
-                Domain
-              </label>
-              <Select
-                value={newTopicDomainId}
-                onChange={(e) => setNewTopicDomainId(e.target.value)}
-                className="mt-1"
-              >
-                <option value="" disabled>
-                  Select a domain
-                </option>
-                {domains.map((domain) => (
-                  <option key={domain.id} value={domain.id}>
-                    {domain.name}
-                  </option>
-                ))}
-              </Select>
-              {domains.length === 0 && (
-                <p className="mt-1 text-xs text-amber-600">
-                  No domains available yet. Ask your admin to add some.
-                </p>
-              )}
+              <div className="flex items-baseline justify-between">
+                <label className="text-sm font-medium text-gray-700">
+                  Domains
+                </label>
+                <span className="text-xs text-gray-400">
+                  {newTopicDomainIds.length > 0
+                    ? `${newTopicDomainIds.length} selected`
+                    : "Pick at least one"}
+                </span>
+              </div>
+              <div className="mt-2">
+                <DomainChips
+                  domains={domains}
+                  selectedIds={newTopicDomainIds}
+                  onChange={setNewTopicDomainIds}
+                />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-baseline justify-between">
+                <label className="text-sm font-medium text-gray-700">
+                  Description
+                </label>
+                <span className="text-xs text-gray-400">
+                  {newTopicDescription.length}/{DESCRIPTION_MAX}
+                </span>
+              </div>
+              <Textarea
+                value={newTopicDescription}
+                maxLength={DESCRIPTION_MAX}
+                onChange={(e) => setNewTopicDescription(e.target.value)}
+                placeholder="Describe the problem, objectives and the technologies you plan to use..."
+                className="mt-1 min-h-[120px]"
+              />
             </div>
             <div>
               <label className="text-sm font-medium text-gray-700">
                 Supporting document{" "}
-                <span className="text-gray-500">(optional)</span>
+                <span className="font-normal text-gray-400">(optional)</span>
               </label>
-              <Input
-                type="file"
-                accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                onChange={(e) => setNewTopicFile(e.target.files?.[0] || null)}
-                className="mt-1"
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                One PDF, DOC, or DOCX file, up to 10 MB.
-              </p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-gray-700">
-                Description
-              </label>
-              <Textarea
-                value={newTopicDescription}
-                onChange={(e) => setNewTopicDescription(e.target.value)}
-                placeholder="Describe your project idea, objectives, technologies you plan to use..."
-                className="mt-1 min-h-[120px]"
-              />
+              {newTopicFile ? (
+                <div className="mt-1 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
+                  <FileText className="h-4 w-4 shrink-0 text-indigo-600" />
+                  <span className="min-w-0 flex-1 truncate">
+                    {newTopicFile.name}
+                  </span>
+                  <span className="shrink-0 text-xs text-gray-400">
+                    {(newTopicFile.size / (1024 * 1024)).toFixed(1)} MB
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Remove file"
+                    onClick={() => setNewTopicFile(null)}
+                    className="rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <label className="mt-1 flex cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed border-gray-300 px-4 py-5 text-center text-sm text-gray-500 transition-colors hover:border-indigo-400 hover:bg-indigo-50/40">
+                  <Upload className="h-5 w-5 text-gray-400" />
+                  <span>
+                    <span className="font-medium text-indigo-600">
+                      Choose a file
+                    </span>{" "}
+                    - PDF, DOC or DOCX, up to 10 MB
+                  </span>
+                  {editingTopic?.document && (
+                    <span className="text-xs text-gray-400">
+                      Current: {editingTopic.document.filename} (uploading
+                      replaces it)
+                    </span>
+                  )}
+                  <input
+                    type="file"
+                    className="sr-only"
+                    accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] || null;
+                      if (f && f.size > MAX_DOC_BYTES) {
+                        setFileError("Document must be 10 MB or smaller.");
+                        e.target.value = "";
+                        return;
+                      }
+                      setFileError(null);
+                      setNewTopicFile(f);
+                    }}
+                  />
+                </label>
+              )}
+              {fileError && (
+                <p className="mt-1 text-xs text-red-600">{fileError}</p>
+              )}
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddTopic(false)}>
+            <Button variant="outline" onClick={closeTopicDialog}>
               Cancel
             </Button>
             <Button
@@ -566,7 +722,7 @@ export function TopicApprovalSection({
               disabled={
                 !newTopicTitle.trim() ||
                 !newTopicDescription.trim() ||
-                !newTopicDomainId
+                newTopicDomainIds.length === 0
               }
             >
               {editingTopic ? "Update Topic" : "Submit Topic"}

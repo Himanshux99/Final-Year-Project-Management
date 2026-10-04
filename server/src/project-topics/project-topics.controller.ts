@@ -65,8 +65,8 @@ export class ProjectTopicsController {
 
   @UseGuards(JwtAuthGuard)
   @Get('messages/topic/:topicId')
-  async getMessagesByTopic(@Param('topicId') topicId: string) {
-    return this.projectTopicsService.getMessagesByTopic(topicId);
+  async getMessagesByTopic(@Request() req: ExpressRequest, @Param('topicId') topicId: string) {
+    return this.projectTopicsService.getMessagesByTopic(topicId, req.user.userId);
   }
 
   @UseGuards(JwtAuthGuard)

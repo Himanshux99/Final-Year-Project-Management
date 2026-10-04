@@ -12,6 +12,8 @@ import { ReviewSection } from "@/components/review-section";
 import { AttachmentsTab } from "@/components/attachments-tab";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/components/ui/toast";
+import { CardSkeleton, ListSkeleton } from "@/components/ui/skeleton";
+import { ProgressCardSkeleton } from "@/components/ProgressCardSkeleton";
 import {
   groupApi,
   mentorAllocationApi,
@@ -220,6 +222,17 @@ export default function ProjectProgressPage() {
     }
   };
   
+  // Lightweight refresh of just the topic list + chat, so a submitted or edited
+  // topic shows up immediately without waiting on (or failing with) loadData().
+  const refreshTopics = async () => {
+    const [groupTopics, messages] = await Promise.all([
+      projectTopicsApi.getMyGroupTopics(),
+      projectTopicsApi.getMyGroupMessages(),
+    ]);
+    setTopics(groupTopics);
+    setTopicMessages(messages);
+  };
+
   // Topic approval document handlers
   const handleTopicApprovalDocChange = async () => {
     try {
@@ -264,14 +277,14 @@ export default function ProjectProgressPage() {
   const handleSubmitTopic = async (
     title: string,
     description: string,
-    domainId: string,
+    domainIds: string[],
     file?: File,
   ) => {
     if (!group || !profile) return;
     try {
-      await projectTopicsApi.create({ title, description, domainId }, file);
+      await projectTopicsApi.create({ title, description, domainIds }, file);
       showToast("Topic submitted successfully!", "success");
-      await loadData();
+      await refreshTopics();
     } catch (error: any) {
       showToast(error.message || "Failed to submit topic", "error");
     }
@@ -281,13 +294,13 @@ export default function ProjectProgressPage() {
     topicId: string,
     title: string,
     description: string,
-    domainId: string,
+    domainIds: string[],
     file?: File,
   ) => {
     if (!group || !profile) return;
     try {
-      await projectTopicsApi.update(topicId, { title, description, domainId }, file);
-      await loadData();
+      await projectTopicsApi.update(topicId, { title, description, domainIds }, file);
+      await refreshTopics();
       showToast("Topic updated successfully!", "success");
     } catch (error: any) {
       showToast(error.message || "Failed to update topic", "error");
@@ -459,8 +472,10 @@ export default function ProjectProgressPage() {
   if (!group || !mentor || !profile ) {
     return (
       <DashboardLayout title="Project Progress">
-        <div className="max-w-4xl mx-auto">
-          <div className="text-center py-12 text-gray-500">Loading...</div>
+        <div className="max-w-4xl mx-auto space-y-6">
+          <CardSkeleton className="h-32" />
+          <ProgressCardSkeleton />
+          <ListSkeleton items={3} />
         </div>
       </DashboardLayout>
     );

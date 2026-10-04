@@ -70,14 +70,6 @@ export interface MentorAllocation {
   updatedAt: string;
 }
 
-export const ACCESS_CODES: Record<Department, string> = {
-  IT: "ITADMIN2025",
-  CS: "CSADMIN2025",
-  ECS: "ECSADMIN2025",
-  ETC: "ETCADMIN2025",
-  BM: "BMADMIN2025",
-};
-
 // ============================================
 // Topic Approval Types
 // ============================================
@@ -99,8 +91,8 @@ export interface ProjectTopic {
   submittedAt: string;
   reviewedBy?: string; // mentor profile id
   reviewedAt?: string;
-  domainId?: string | null;
-  domain?: Domain | null;
+  domains?: Domain[];
+  lastEditedAt?: string | null;
   document?: TopicSubmissionDocument;
 }
 

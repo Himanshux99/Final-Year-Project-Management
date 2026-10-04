@@ -17,6 +17,21 @@ export class ProjectTopicsService {
     private supabaseService: SupabaseService,
   ) {}
 
+  // Ensures at least one domain is selected and every id refers to an active domain.
+  private async validateDomainIds(domainIds: string[] | undefined): Promise<string[]> {
+    const unique = Array.from(new Set(domainIds ?? []));
+    if (unique.length === 0) {
+      throw new BadRequestException('Select at least one domain');
+    }
+    const found = await this.prisma.domain.count({
+      where: { id: { in: unique }, isActive: true },
+    });
+    if (found !== unique.length) {
+      throw new BadRequestException('One or more selected domains are invalid');
+    }
+    return unique;
+  }
+
   async createTopic(userId: string, createTopicDto: CreateTopicDto, file?: Express.Multer.File) {
     const profile = await this.profilesService.findByUserId(userId);
     if (!profile) {
@@ -44,12 +59,7 @@ export class ProjectTopicsService {
       throw new BadRequestException('Your group already has an approved topic');
     }
 
-    const domain = await this.prisma.domain.findUnique({
-      where: { id: createTopicDto.domainId },
-    });
-    if (!domain || !domain.isActive) {
-      throw new BadRequestException('Invalid domain selected');
-    }
+    const domainIds = await this.validateDomainIds(createTopicDto.domainIds);
 
     let storagePath: string | undefined;
     let fileUrl: string | undefined;
@@ -77,7 +87,7 @@ export class ProjectTopicsService {
         groupId: group.id,
         title: createTopicDto.title,
         description: createTopicDto.description,
-        domainId: createTopicDto.domainId,
+        domains: { connect: domainIds.map((id) => ({ id })) },
         submittedBy: profile.id,
         ...(file && fileUrl ? {
           document: {
@@ -90,7 +100,7 @@ export class ProjectTopicsService {
           },
         } : {}),
       },
-      include: { document: true, domain: true },
+      include: { document: true, domains: true },
     });
     } catch (error) {
       if (storagePath) {
@@ -114,7 +124,7 @@ export class ProjectTopicsService {
     return this.prisma.projectTopic.findMany({
       where: { groupId: group.id },
       orderBy: { submittedAt: 'desc' },
-      include: { document: true, domain: true },
+      include: { document: true, domains: true },
     });
   }
 
@@ -124,19 +134,12 @@ export class ProjectTopicsService {
       throw new BadRequestException('Profile not found');
     }
 
-    // Faculty and super_admin can view any group's topics
-    if (profile.role !== 'faculty' && profile.role !== 'super_admin') {
-      // Students can only view their own group
-      const group = await this.groupsService.getMyGroup(userId);
-      if (!group || group.id !== groupId) {
-        throw new ForbiddenException('You can only view your own group topics');
-      }
-    }
+    await this.groupsService.assertGroupAccess(profile, groupId);
 
     return this.prisma.projectTopic.findMany({
       where: { groupId },
       orderBy: { submittedAt: 'desc' },
-      include: { document: true, domain: true },
+      include: { document: true, domains: true },
     });
   }
 
@@ -153,6 +156,7 @@ export class ProjectTopicsService {
     if (!topic) {
       throw new NotFoundException('Topic not found');
     }
+    await this.groupsService.assertGroupAccess(profile, topic.groupId);
 
     if (topic.status === 'approved') {
       throw new BadRequestException('Topic is already approved');
@@ -181,6 +185,7 @@ export class ProjectTopicsService {
     if (!topic) {
       throw new NotFoundException('Topic not found');
     }
+    await this.groupsService.assertGroupAccess(profile, topic.groupId);
 
     return this.prisma.projectTopic.update({
       where: { id: topicId },
@@ -205,6 +210,7 @@ export class ProjectTopicsService {
     if (!topic) {
       throw new NotFoundException('Topic not found');
     }
+    await this.groupsService.assertGroupAccess(profile, topic.groupId);
 
     const updatedTopic = await this.prisma.projectTopic.update({
       where: { id: topicId },
@@ -212,6 +218,7 @@ export class ProjectTopicsService {
         status: 'revision_requested',
         reviewedBy: profile.id,
         reviewedAt: new Date(),
+        lastEditedAt: null,
       },
     });
 
@@ -247,13 +254,7 @@ export class ProjectTopicsService {
       }
       groupId = topic.groupId;
 
-      // Verify access: students must be in the group, faculty/admin can access any group
-      if (profile.role === 'student') {
-        const group = await this.groupsService.getMyGroup(userId);
-        if (!group || group.id !== groupId) {
-          throw new ForbiddenException('You can only message in your group topics');
-        }
-      }
+      await this.groupsService.assertGroupAccess(profile, groupId);
     } else {
       // For general discussion without specific topic
       if (profile.role === 'student') {
@@ -268,6 +269,7 @@ export class ProjectTopicsService {
           throw new BadRequestException('Group ID is required for general messages');
         }
         groupId = addMessageDto.groupId;
+        await this.groupsService.assertGroupAccess(profile, groupId);
       }
     }
 
@@ -284,10 +286,32 @@ export class ProjectTopicsService {
     });
   }
 
-  async getMessagesByTopic(topicId: string) {
+  async getMessagesByTopic(topicId: string, userId: string) {
     // Handle "general" as null for general group discussion
     const dbTopicId = topicId === 'general' ? null : topicId;
-    
+
+    if (!dbTopicId) {
+      // "General" thread has no topic to scope by, so scope it to the caller's own group
+      const group = await this.groupsService.getMyGroup(userId);
+      if (!group) return [];
+      return this.prisma.topicMessage.findMany({
+        where: { topicId: null, groupId: group.id },
+        orderBy: { createdAt: 'asc' },
+      });
+    }
+
+    {
+      const profile = await this.profilesService.findByUserId(userId);
+      const topic = await this.prisma.projectTopic.findUnique({
+        where: { id: dbTopicId },
+        select: { groupId: true },
+      });
+      if (!profile || !topic) {
+        throw new NotFoundException('Topic not found');
+      }
+      await this.groupsService.assertGroupAccess(profile, topic.groupId);
+    }
+
     return this.prisma.topicMessage.findMany({
       where: { topicId: dbTopicId },
       orderBy: { createdAt: 'asc' },
@@ -312,14 +336,7 @@ export class ProjectTopicsService {
       throw new BadRequestException('Profile not found');
     }
 
-    // Faculty and super_admin can view any group's messages
-    if (profile.role !== 'faculty' && profile.role !== 'super_admin') {
-      // Students can only view their own group
-      const group = await this.groupsService.getMyGroup(userId);
-      if (!group || group.id !== groupId) {
-        throw new ForbiddenException('You can only view your own group messages');
-      }
-    }
+    await this.groupsService.assertGroupAccess(profile, groupId);
 
     return this.prisma.topicMessage.findMany({
       where: { groupId },
@@ -344,6 +361,7 @@ export class ProjectTopicsService {
       include: {
         group: true,
         document: true,
+        domains: true,
       },
     });
 
@@ -365,14 +383,9 @@ export class ProjectTopicsService {
       );
     }
 
-    if (updateTopicDto.domainId) {
-      const domain = await this.prisma.domain.findUnique({
-        where: { id: updateTopicDto.domainId },
-      });
-      if (!domain || !domain.isActive) {
-        throw new BadRequestException('Invalid domain selected');
-      }
-    }
+    const domainIds = updateTopicDto.domainIds
+      ? await this.validateDomainIds(updateTopicDto.domainIds)
+      : undefined;
 
     let documentData = {};
 
@@ -412,18 +425,51 @@ export class ProjectTopicsService {
       }
     }
 
-    return this.prisma.projectTopic.update({
+    const changes: string[] = [];
+    if (updateTopicDto.title && updateTopicDto.title !== topic.title) changes.push('title');
+    if (updateTopicDto.description && updateTopicDto.description !== topic.description) {
+      changes.push('description');
+    }
+    if (domainIds) {
+      const before = topic.domains.map((d) => d.id).sort().join(',');
+      if (before !== [...domainIds].sort().join(',')) changes.push('domains');
+    }
+    if (file) changes.push('document');
+
+    const updated = await this.prisma.projectTopic.update({
       where: { id: topicId },
       data: {
         title: updateTopicDto.title,
         description: updateTopicDto.description,
-        ...(updateTopicDto.domainId ? { domainId: updateTopicDto.domainId } : {}),
+        lastEditedAt: new Date(),
+        ...(domainIds ? { domains: { set: domainIds.map((id) => ({ id })) } } : {}),
         ...documentData,
       },
       include: {
         document: true,
-        domain: true,
+        domains: true,
       },
     });
+
+    // Let faculty know in the topic thread what the students changed.
+    // Same numbering the UI shows: position by submission time, oldest = #1.
+    const topicNumber =
+      (await this.prisma.projectTopic.count({
+        where: { groupId: group.id, submittedAt: { lt: topic.submittedAt } },
+      })) + 1;
+
+    await this.prisma.topicMessage.create({
+      data: {
+        topicId,
+        groupId: group.id,
+        authorId: profile.id,
+        authorName: profile.name,
+        authorRole: 'student',
+        content: `Topic #${topicNumber} updated${changes.length ? ` (${changes.join(', ')})` : ''}. Please review the latest version.`,
+        links: [],
+      },
+    });
+
+    return updated;
   }
 }

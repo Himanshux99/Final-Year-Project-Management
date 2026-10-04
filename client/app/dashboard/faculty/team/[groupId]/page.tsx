@@ -54,6 +54,11 @@ export default function FacultyTeamPage() {
   const [evaluationSessionId, setEvaluationSessionId] = useState("");
 
   const groupId = params.groupId;
+  const isAdmin = profile?.role === "super_admin";
+  // Accepted mentor of this team (included by the group lookup)
+  const teamMentor = (group as any)?.allocations?.[0]?.mentor as
+    | { id: string; name: string }
+    | undefined;
   const hasApprovedTopic = topics.some((t) => t.status === "approved");
   const hasTopicApprovalDoc = !!topicApprovalDoc;
   const review1Evaluation = groupEvaluations.find((evaluation) => evaluation.reviewType === "review_1");
@@ -147,11 +152,11 @@ export default function FacultyTeamPage() {
   const handleSubmitTopic = async (
     title: string,
     description: string,
-    domainId: string,
+    domainIds: string[],
     file?: File,
   ) => {
     try {
-      await projectTopicsApi.create({ title, description, domainId }, file);
+      await projectTopicsApi.create({ title, description, domainIds }, file);
       showToast("Topic submitted!", "success");
       await loadTeamData();
     } catch (error: any) {
@@ -183,7 +188,7 @@ export default function FacultyTeamPage() {
     topicId: string,
     title: string,
     description: string,
-    domainId: string,
+    domainIds: string[],
     file?: File,
   ) => { return; }
   const handleRequestRevision = async (topicId: string, feedback: string) => {
@@ -354,10 +359,17 @@ export default function FacultyTeamPage() {
   }
 
   return (
-    <DashboardLayout title="Faculty Dashboard">
+    <DashboardLayout
+      title={isAdmin ? "Super Admin Dashboard" : "Faculty Dashboard"}
+    >
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="flex justify-between items-center">
-          <Button variant="outline" onClick={() => router.push("/dashboard/faculty")}>
+          <Button
+            variant="outline"
+            onClick={() =>
+              router.push(isAdmin ? "/dashboard/admin" : "/dashboard/faculty")
+            }
+          >
             ← Back to Dashboard
           </Button>
           <Button variant="outline" onClick={loadTeamData} className="gap-2">
@@ -371,8 +383,17 @@ export default function FacultyTeamPage() {
             <div>
               <h2 className="font-semibold text-lg">Group {group.groupId}</h2>
               <p className="text-sm text-gray-600">
-                Mentor: <span className="font-medium">{profile.name}</span>
+                Mentor:{" "}
+                <span className="font-medium">
+                  {teamMentor?.name ?? (isAdmin ? "Not assigned" : profile.name)}
+                </span>
               </p>
+              {isAdmin && (
+                <p className="mt-0.5 text-xs text-indigo-600">
+                  You&apos;re acting as coordinator, with full mentor access to
+                  this team.
+                </p>
+              )}
             </div>
             {hasApprovedTopic && (
               <div className="text-right">
@@ -454,8 +475,8 @@ export default function FacultyTeamPage() {
                 isRolledOut={review1RolledOut}
                 isUnlocked={hasApprovedTopic && hasTopicApprovalDoc}
                 isLeader={false}
-                onSubmitProgress={() => showToast("Only students can submit progress", "error")}
-                onUpdateProgress={() => showToast("Only students can update progress", "error")}
+                onSubmitProgress={async () => showToast("Only students can submit progress", "error")}
+                onUpdateProgress={async () => showToast("Only students can update progress", "error")}
                 onSubmitFeedback={(f) => handleSubmitFeedback("review_1", f)}
                 onSendMessage={(c, l) => handleSendReviewMessage("review_1", c, l)}
                 onMarkComplete={() => handleMarkComplete("review_1")}
@@ -488,8 +509,8 @@ export default function FacultyTeamPage() {
                 isRolledOut={review2RolledOut}
                 isUnlocked={hasApprovedTopic && hasTopicApprovalDoc && review1Session?.status === "completed"}
                 isLeader={false}
-                onSubmitProgress={() => showToast("Only students can submit progress", "error")}
-                onUpdateProgress={() => showToast("Only students can update progress", "error")}
+                onSubmitProgress={async () => showToast("Only students can submit progress", "error")}
+                onUpdateProgress={async () => showToast("Only students can update progress", "error")}
                 onSubmitFeedback={(f) => handleSubmitFeedback("review_2", f)}
                 onSendMessage={(c, l) => handleSendReviewMessage("review_2", c, l)}
                 onMarkComplete={() => handleMarkComplete("review_2")}
@@ -511,8 +532,8 @@ export default function FacultyTeamPage() {
               isRolledOut={finalReviewRolledOut}
               isUnlocked={hasApprovedTopic && hasTopicApprovalDoc && review2Session?.status === "completed"}
               isLeader={false}
-              onSubmitProgress={() => showToast("Only students can submit progress", "error")}
-              onUpdateProgress={() => showToast("Only students can update progress", "error")}
+              onSubmitProgress={async () => showToast("Only students can submit progress", "error")}
+              onUpdateProgress={async () => showToast("Only students can update progress", "error")}
               onSubmitFeedback={(f) => handleSubmitFeedback("final_review", f)}
               onSendMessage={(c, l) => handleSendReviewMessage("final_review", c, l)}
               onMarkComplete={() => handleMarkComplete("final_review")}

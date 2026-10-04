@@ -55,16 +55,16 @@ model Profile {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // Relations
-  createdGroups           Group[]                @relation("GroupCreator")
-  groupMemberships        GroupMember[]
-  createdMentorForms      MentorAllocationForm[]
-  submittedPreferences    MentorPreference[]
-  mentorAllocations       MentorAllocation[]     @relation("MentorAllocations")
-  availableInForms        AvailableMentor[]
-  uploadedAttachments     Attachment[]
-  topicApprovalDocuments  TopicApprovalDocument[] @relation("TopicApprovalUploader")
-  filledEvaluations       ReviewEvaluation[]      @relation("EvaluationFiller")
-  studentGrades           StudentGrade[]          @relation("StudentGrades")
+  createdGroups          Group[]                 @relation("GroupCreator")
+  groupMemberships       GroupMember[]
+  createdMentorForms     MentorAllocationForm[]
+  submittedPreferences   MentorPreference[]
+  mentorAllocations      MentorAllocation[]      @relation("MentorAllocations")
+  availableInForms       AvailableMentor[]
+  uploadedAttachments    Attachment[]
+  topicApprovalDocuments TopicApprovalDocument[] @relation("TopicApprovalUploader")
+  filledEvaluations      ReviewEvaluation[]      @relation("EvaluationFiller")
+  studentGrades          StudentGrade[]          @relation("StudentGrades")
 }
 
 // Group/Team model
@@ -79,14 +79,14 @@ model Group {
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 
-  creator              Profile                @relation("GroupCreator", fields: [createdBy], references: [id])
-  members              GroupMember[]
-  preferences          MentorPreference[]
-  allocations          MentorAllocation[]
-  topics               ProjectTopic[]
-  attachments          Attachment[]
-  topicApprovalDoc     TopicApprovalDocument?
-  reviewEvaluations    ReviewEvaluation[]
+  creator           Profile                @relation("GroupCreator", fields: [createdBy], references: [id])
+  members           GroupMember[]
+  preferences       MentorPreference[]
+  allocations       MentorAllocation[]
+  topics            ProjectTopic[]
+  attachments       Attachment[]
+  topicApprovalDoc  TopicApprovalDocument?
+  reviewEvaluations ReviewEvaluation[]
 }
 
 // Group membership (many-to-many between Profile and Group)
@@ -204,21 +204,22 @@ model ProjectTopic {
   groupId     String
   title       String
   description String      @db.Text
-  domainId    String?
   status      TopicStatus @default(submitted)
   submittedBy String
   submittedAt DateTime    @default(now())
   reviewedBy  String?
   reviewedAt  DateTime?
+  // Set when the students edit a topic; cleared when faculty next act on it.
+  lastEditedAt DateTime?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
-  group    Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  domain   Domain?        @relation(fields: [domainId], references: [id])
+  group    Group                    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  domains  Domain[]                 @relation("TopicDomains")
   messages TopicMessage[]
   document TopicSubmissionDocument?
+
   @@index([groupId])
-  @@index([domainId])
 }
 
 // Project domains (e.g. AI/ML, Web Dev) - managed by super admin, selected
@@ -230,18 +231,18 @@ model Domain {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  topics ProjectTopic[]
+  topics ProjectTopic[] @relation("TopicDomains")
 }
 
 // A topic submission may include one supporting document.
 model TopicSubmissionDocument {
-  id          String   @id @default(uuid())
-  topicId     String   @unique
-  filename    String
-  fileUrl     String
-  fileSize    Int
-  mimeType    String
-  uploadedAt  DateTime @default(now())
+  id         String   @id @default(uuid())
+  topicId    String   @unique
+  filename   String
+  fileUrl    String
+  fileSize   Int
+  mimeType   String
+  uploadedAt DateTime @default(now())
 
   topic ProjectTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
 }
@@ -343,19 +344,19 @@ enum AttachmentStage {
 }
 
 model Attachment {
-  id          String          @id @default(uuid())
-  groupId     String
-  stage       AttachmentStage? // Made optional for backwards compatibility
-  filename    String
-  fileUrl     String
-  fileSize    Int             // Size in bytes
-  mimeType    String
-  uploadedBy  String          // Profile ID of uploader
-  uploadedAt  DateTime        @default(now())
-  
-  group       Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  uploader    Profile         @relation(fields: [uploadedBy], references: [id])
-  
+  id         String           @id @default(uuid())
+  groupId    String
+  stage      AttachmentStage? // Made optional for backwards compatibility
+  filename   String
+  fileUrl    String
+  fileSize   Int // Size in bytes
+  mimeType   String
+  uploadedBy String // Profile ID of uploader
+  uploadedAt DateTime         @default(now())
+
+  group    Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  uploader Profile @relation(fields: [uploadedBy], references: [id])
+
   @@index([groupId])
 }
 
@@ -364,17 +365,17 @@ model Attachment {
 // ============================================
 
 model TopicApprovalDocument {
-  id          String   @id @default(uuid())
-  groupId     String   @unique
-  filename    String
-  fileUrl     String
-  fileSize    Int      // Size in bytes
-  mimeType    String
-  uploadedBy  String   // Profile ID (group leader)
-  uploadedAt  DateTime @default(now())
-  
-  group       Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  uploader    Profile  @relation("TopicApprovalUploader", fields: [uploadedBy], references: [id])
+  id         String   @id @default(uuid())
+  groupId    String   @unique
+  filename   String
+  fileUrl    String
+  fileSize   Int // Size in bytes
+  mimeType   String
+  uploadedBy String // Profile ID (group leader)
+  uploadedAt DateTime @default(now())
+
+  group    Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  uploader Profile @relation("TopicApprovalUploader", fields: [uploadedBy], references: [id])
 }
 
 // ============================================
@@ -382,66 +383,66 @@ model TopicApprovalDocument {
 // ============================================
 
 model ReviewEvaluation {
-  id                   String     @id @default(uuid())
-  sessionId            String     @unique
-  groupId              String
-  reviewType           ReviewType
-  
+  id         String     @id @default(uuid())
+  sessionId  String     @unique
+  groupId    String
+  reviewType ReviewType
+
   // Header fields
-  evaluationDate       DateTime
-  division             String     // A or B
-  projectGuide         String     // Pre-filled from mentor name
-  projectTitle         String     // Pre-filled from approved topic
-  
+  evaluationDate DateTime
+  division       String // A or B
+  projectGuide   String // Pre-filled from mentor name
+  projectTitle   String // Pre-filled from approved topic
+
   // Review 1 specific fields
-  projectCategory      String?    // A/B/C (Very Good/Good/Satisfactory)
-  projectType          String?    // Research/Application/Product/Industry/Social
-  
+  projectCategory String? // A/B/C (Very Good/Good/Satisfactory)
+  projectType     String? // Research/Application/Product/Industry/Social
+
   // Review 2 specific fields
-  projectDomain        String?    // AI ML, NLP, Web, Security, Big Data, etc.
-  qualityGrade         String?    // A/B/C
-  projectNature        String?    // Research/Application/Product/Social
-  
+  projectDomain String? // AI ML, NLP, Web, Security, Big Data, etc.
+  qualityGrade  String? // A/B/C
+  projectNature String? // Research/Application/Product/Social
+
   // Common fields
-  completionPercentage Int        // 0-100
-  remarks              String?    @db.Text
-  
+  completionPercentage Int // 0-100
+  remarks              String? @db.Text
+
   // Audit fields
-  filledBy             String     // Mentor profile id
-  filledAt             DateTime   @default(now())
-  
-  session              ReviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  group                Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  mentor               Profile       @relation("EvaluationFiller", fields: [filledBy], references: [id])
-  studentGrades        StudentGrade[]
-  
+  filledBy String // Mentor profile id
+  filledAt DateTime @default(now())
+
+  session       ReviewSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  group         Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  mentor        Profile        @relation("EvaluationFiller", fields: [filledBy], references: [id])
+  studentGrades StudentGrade[]
+
   @@index([groupId])
   @@index([reviewType])
 }
 
 model StudentGrade {
-  id              String   @id @default(uuid())
-  evaluationId    String
-  profileId       String
-  studentName     String
-  rollNumber      String
-  
+  id           String @id @default(uuid())
+  evaluationId String
+  profileId    String
+  studentName  String
+  rollNumber   String
+
   // Review 1 grading (max 25 total)
-  progressMarks       Int?     // 0-10: Progress of project implementation
-  contributionMarks   Int?     // 0-10: Individual contribution in project
-  publicationMarks    Int?     // 0-5: Paper Publication Status
-  
+  progressMarks     Int? // 0-10: Progress of project implementation
+  contributionMarks Int? // 0-10: Individual contribution in project
+  publicationMarks  Int? // 0-5: Paper Publication Status
+
   // Review 2 grading (max 25 total)
-  techUsageMarks      Int?     // 0-5: Usage of tech, Cost effective & Social impact
-  innovationMarks     Int?     // 0-5: Innovativeness & Feasibility
-  presentationMarks   Int?     // 0-5: Overall Presentation & Perf.
-  activityMarks       Int?     // 0-5: Project Activity (SIH/Paper)
-  synopsisMarks       Int?     // 0-5: Project Synopsis
-  
-  totalMarks          Int      // Calculated total
-  
-  evaluation      ReviewEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
-  student         Profile          @relation("StudentGrades", fields: [profileId], references: [id])
-  
+  techUsageMarks    Int? // 0-5: Usage of tech, Cost effective & Social impact
+  innovationMarks   Int? // 0-5: Innovativeness & Feasibility
+  presentationMarks Int? // 0-5: Overall Presentation & Perf.
+  activityMarks     Int? // 0-5: Project Activity (SIH/Paper)
+  synopsisMarks     Int? // 0-5: Project Synopsis
+
+  totalMarks Int // Calculated total
+
+  evaluation ReviewEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  student    Profile          @relation("StudentGrades", fields: [profileId], references: [id])
+
   @@index([evaluationId])
 }

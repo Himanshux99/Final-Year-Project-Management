@@ -52,6 +52,12 @@ export const authApi = {
   getMe: async (): Promise<AuthResponse> => {
     return api.get<AuthResponse>("/auth/me");
   },
+
+  changePassword: async (
+    data: ChangePasswordRequest,
+  ): Promise<{ message: string }> => {
+    return api.post<{ message: string }>("/auth/change-password", data);
+  },
 };
 
 
@@ -61,12 +67,36 @@ export const authApi = {
 export interface CreateProfileRequest {
   name: string;
   email: string;
-  role: Role;
+  role: "student";
   department: Department;
   rollNumber?: string;
   semester?: number;
-  accessCode?: string;
-  domains?: string;
+}
+
+export interface CreateFacultyRequest {
+  name: string;
+  email: string;
+  password: string;
+  domainIds?: string[];
+}
+
+export interface PendingMentorRequest {
+  id: string;
+  preferenceRank: number;
+  createdAt: string;
+  mentor: { id: string; name: string; email: string; domains: string | null };
+  group: {
+    id: string;
+    groupId: string;
+    teamCode: string;
+    leaderName: string;
+    memberCount: number;
+  };
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
 }
 
 export const profileApi = {
@@ -216,6 +246,22 @@ export const mentorFormApi = {
   deactivate: async (id: string): Promise<MentorFormWithMentors> => {
     return api.patch<MentorFormWithMentors>(`/mentor-forms/${id}/deactivate`);
   },
+
+  // Counts of what deleting the form would remove (for the confirmation dialog).
+  getSummary: async (
+    id: string,
+  ): Promise<{
+    preferences: number;
+    allocations: number;
+    acceptedAllocations: number;
+  }> => {
+    return api.get(`/mentor-forms/${id}/summary`);
+  },
+
+  // Permanently deletes the form and all submissions/allocations made against it.
+  delete: async (id: string): Promise<{ message: string }> => {
+    return api.delete<{ message: string }>(`/mentor-forms/${id}`);
+  },
 };
 
 // ============ MENTOR PREFERENCES API ============
@@ -316,13 +362,13 @@ import { ProjectTopic, TopicMessage } from "@/types";
 export interface CreateTopicRequest {
   title: string;
   description: string;
-  domainId: string;
+  domainIds: string[];
 }
 
 export interface UpdateTopicRequest {
   title?: string;
   description?: string;
-  domainId?: string;
+  domainIds?: string[];
 }
 
 export interface ReviewTopicRequest {
@@ -342,7 +388,7 @@ export const projectTopicsApi = {
       return api.uploadWithFields<ProjectTopic>("/project-topics", file, {
         title: data.title,
         description: data.description,
-        domainId: data.domainId,
+        domainIds: data.domainIds,
       });
     }
     return api.post<ProjectTopic>("/project-topics", data);
@@ -361,7 +407,7 @@ export const projectTopicsApi = {
         {
           title: data.title ?? "",
           description: data.description ?? "",
-          ...(data.domainId ? { domainId: data.domainId } : {}),
+          ...(data.domainIds ? { domainIds: data.domainIds } : {}),
         },
         "PATCH", // if uploadWithFields supports custom methods
       );
@@ -528,6 +574,23 @@ export interface AllocateMentorRequest {
 }
 
 export const adminApi = {
+  getPendingMentorRequests: async (): Promise<PendingMentorRequest[]> => {
+    return api.get<PendingMentorRequest[]>("/admin/mentor-requests");
+  },
+
+  createFaculty: async (data: CreateFacultyRequest): Promise<Profile> => {
+    return api.post<Profile>("/admin/faculty", data);
+  },
+
+  updateFacultyDomains: async (
+    facultyId: string,
+    domainIds: string[],
+  ): Promise<Profile> => {
+    return api.patch<Profile>(`/admin/faculty/${facultyId}/domains`, {
+      domainIds,
+    });
+  },
+
   getMentorOverview: async (): Promise<MentorOverview[]> => {
     return api.get<MentorOverview[]>("/admin/mentor-overview");
   },
