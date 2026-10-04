@@ -136,3 +136,11 @@ Tech highlights:
 - See client/README.md and server/README.md for detailed workflow, API endpoints, and developer notes.
 
 If you want, I can create this file in the repo now.
+
+
+## Seed Command
+npx ts-node --transpile-only prisma/seed/test-flow/(file)
+
+#### Delete Seed data
+npx ts-node --transpile-only prisma/seed/test-flow/cleanup.ts --dry-run   # preview only
+npx ts-node --transpile-only prisma/seed/test-flow/cleanup.ts             # delete
