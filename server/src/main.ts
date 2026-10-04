@@ -1,10 +1,27 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { RequestMethod } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { AppLogger } from './common/app-logger';
+import { httpLogger } from './common/http-logger.middleware';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    logger: new AppLogger(),
+  });
+  const logger = new Logger('Bootstrap');
+
+  // Behind a proxy (Render, Vercel, etc.) req.ip would otherwise be the proxy's address.
+  app.set('trust proxy', 1);
+
+  // Request logs for development and deployments. Registered first so every request is
+  // covered, including CORS preflights and 404s. Set LOG_REQUESTS=false to turn off.
+  if (process.env.LOG_REQUESTS !== 'false') {
+    app.use(
+      httpLogger({ logHealthChecks: process.env.LOG_HEALTH_CHECKS === 'true' }),
+    );
+  }
 
   // Browsers send the Origin header without a trailing slash and in lower case, so
   // normalise configured values the same way (e.g. "https://app.vercel.app/" in an
@@ -24,7 +41,7 @@ async function bootstrap() {
     ...configuredOrigins,
   ]);
 
-  console.log('Allowed CORS origins:', Array.from(allowedOrigins))
+  logger.log(`Allowed CORS origins: ${Array.from(allowedOrigins).join(', ')}`);
   // Enable CORS for frontend
   app.enableCors({
     origin: (origin, callback) => {
@@ -41,7 +58,7 @@ async function bootstrap() {
 
       // Reject without throwing, so the response is a normal one (just without
       // CORS headers) instead of a 500 from the error handler.
-      console.warn(`CORS blocked for origin: ${origin}`);
+      logger.warn(`CORS blocked for origin: ${origin}`);
       callback(null, false);
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -64,6 +81,6 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3001;
   await app.listen(port);
-  console.log(`🚀 Server running on http://localhost:${port}`);
+  logger.log(`Server running on http://localhost:${port}`);
 }
 bootstrap();

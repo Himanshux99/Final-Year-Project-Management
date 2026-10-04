@@ -3,8 +3,15 @@
  * Base URL configuration and axios instance
  */
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
+// The server serves every route under "/api". Accept NEXT_PUBLIC_API_URL with or without
+// that suffix (and with a trailing slash) so a bare host like
+// "https://my-api.onrender.com" doesn't turn every request into a 404.
+function resolveApiBaseUrl(raw: string | undefined): string {
+  const base = (raw || "http://localhost:3001/api").trim().replace(/\/+$/, "");
+  return base.endsWith("/api") ? base : `${base}/api`;
+}
+
+const API_BASE_URL = resolveApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
 
 // Token management
 const TOKEN_KEY = "projecthub_token";
