@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Param, Patch, UseGuards, Request } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Patch, Delete, UseGuards, Request } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
 import { MentorFormsService } from './mentor-forms.service';
 import { CreateMentorFormDto } from './dto/create-mentor-form.dto';
@@ -25,6 +25,18 @@ export class MentorFormsController {
   @Get('active/:department')
   async getActiveForm(@Param('department') department: Department) {
     return this.mentorFormsService.getActiveForm(department);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/summary')
+  async getSummary(@Request() req: ExpressRequest, @Param('id') id: string) {
+    return this.mentorFormsService.getFormSummary(req.user.userId, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete(':id')
+  async remove(@Request() req: ExpressRequest, @Param('id') id: string) {
+    return this.mentorFormsService.deleteForm(req.user.userId, id);
   }
 
   @UseGuards(JwtAuthGuard)

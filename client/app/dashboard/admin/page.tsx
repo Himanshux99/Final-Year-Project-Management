@@ -16,6 +16,7 @@ import {
   Trash2,
   Pencil,
   Tags,
+  RotateCcw,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -23,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton, RowsSkeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -33,6 +34,8 @@ import {
   reviewsApi,
   projectTopicsApi,
   adminApi,
+  mentorAllocationApi,
+  type PendingMentorRequest,
   evaluationsApi,
   domainsApi,
 } from "@/lib/api";
@@ -48,6 +51,13 @@ import {
   Domain,
 } from "@/types";
 import { MentorOverviewPanel } from "@/components/mentor-overview-panel";
+import { DomainChips } from "@/components/domain-chips";
+import { EvaluationsPanel } from "@/components/evaluations-panel";
+import {
+  DeleteFormDialog,
+  RetakeFormDialog,
+  UnpublishReviewDialog,
+} from "@/components/form-action-dialogs";
 import { ManualAllocationModal } from "@/components/manual-allocation-modal";
 import {
   exportMentorOverviewAsCSV,
@@ -129,6 +139,29 @@ export default function AdminDashboard() {
   const [addingDomain, setAddingDomain] = useState(false);
   const [editingDomainId, setEditingDomainId] = useState<string | null>(null);
   const [editingDomainName, setEditingDomainName] = useState("");
+
+  // Add-faculty form state
+  const [newFaculty, setNewFaculty] = useState({
+    name: "",
+    email: "",
+    password: "",
+    domainIds: [] as string[],
+  });
+  const [addingFaculty, setAddingFaculty] = useState(false);
+  const [showRetakeForm, setShowRetakeForm] = useState(false);
+  const [showDeleteForm, setShowDeleteForm] = useState(false);
+  const [pendingRequests, setPendingRequests] = useState<
+    PendingMentorRequest[] | null
+  >(null);
+  const [actingRequestId, setActingRequestId] = useState<string | null>(null);
+  const [reviewToUnpublish, setReviewToUnpublish] = useState<ReviewType | null>(
+    null,
+  );
+  const [editingFacultyId, setEditingFacultyId] = useState<string | null>(null);
+  const [editingFacultyDomainIds, setEditingFacultyDomainIds] = useState<
+    string[]
+  >([]);
+  const [savingFacultyDomains, setSavingFacultyDomains] = useState(false);
 
   useEffect(() => {
     // Wait for auth to finish loading
@@ -316,10 +349,68 @@ export default function AdminDashboard() {
 
   // Load domains when the domains tab is active
   useEffect(() => {
-    if (activeTab === "domains" && domains.length === 0) {
+    if (
+      (activeTab === "domains" || activeTab === "faculty") &&
+      domains.length === 0
+    ) {
       loadDomains();
     }
   }, [activeTab, domains.length, loadDomains]);
+
+  const handleAddFaculty = async () => {
+    const { name, email, password, domainIds } = newFaculty;
+    if (!name.trim() || !email.trim() || password.length < 6) return;
+    setAddingFaculty(true);
+    try {
+      await adminApi.createFaculty({
+        name: name.trim(),
+        email: email.trim(),
+        password,
+        domainIds,
+      });
+      setNewFaculty({ name: "", email: "", password: "", domainIds: [] });
+      showToast("Faculty account created!", "success");
+      invalidateCache(CACHE_KEYS.ADMIN_DASHBOARD);
+      await loadData(true);
+    } catch (error: any) {
+      showToast(error.message || "Failed to create faculty", "error");
+    } finally {
+      setAddingFaculty(false);
+    }
+  };
+
+  // Preselect the managed domains that match the faculty's current domain text.
+  const handleStartEditFacultyDomains = (faculty: Profile) => {
+    const current = (faculty.domains || "")
+      .split(",")
+      .map((d) => d.trim().toLowerCase())
+      .filter(Boolean);
+    setEditingFacultyId(faculty.id);
+    setEditingFacultyDomainIds(
+      domains
+        .filter((d) => d.isActive && current.includes(d.name.toLowerCase()))
+        .map((d) => d.id),
+    );
+  };
+
+  const handleSaveFacultyDomains = async () => {
+    if (!editingFacultyId) return;
+    setSavingFacultyDomains(true);
+    try {
+      await adminApi.updateFacultyDomains(
+        editingFacultyId,
+        editingFacultyDomainIds,
+      );
+      setEditingFacultyId(null);
+      showToast("Faculty domains updated!", "success");
+      invalidateCache(CACHE_KEYS.ADMIN_DASHBOARD);
+      await loadData(true);
+    } catch (error: any) {
+      showToast(error.message || "Failed to update domains", "error");
+    } finally {
+      setSavingFacultyDomains(false);
+    }
+  };
 
   const handleAddDomain = async () => {
     if (!newDomainName.trim()) return;
@@ -440,6 +531,95 @@ export default function AdminDashboard() {
       showToast(error.message || "Failed to roll out form", "error");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Throws on failure so the confirm dialogs stay open; they close on success.
+  const loadPendingRequests = useCallback(async () => {
+    try {
+      setPendingRequests(await adminApi.getPendingMentorRequests());
+    } catch (error) {
+      console.error("Failed to load mentor requests:", error);
+      setPendingRequests([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (profile?.role === "super_admin") loadPendingRequests();
+  }, [profile?.role, loadPendingRequests]);
+
+  // Accept or reject a team request on the mentor's behalf.
+  const handleRequestDecision = async (
+    request: PendingMentorRequest,
+    decision: "accept" | "reject",
+  ) => {
+    setActingRequestId(request.id);
+    try {
+      if (decision === "accept") {
+        await mentorAllocationApi.accept(request.id);
+        showToast(
+          `${request.group.groupId} accepted for ${request.mentor.name}`,
+          "success",
+        );
+      } else {
+        await mentorAllocationApi.reject(request.id);
+        showToast(
+          `${request.group.groupId} rejected for ${request.mentor.name}`,
+          "success",
+        );
+      }
+      invalidateCache(CACHE_KEYS.ADMIN_DASHBOARD);
+      await Promise.all([loadPendingRequests(), loadData(true)]);
+    } catch (error: any) {
+      showToast(error.message || `Failed to ${decision} request`, "error");
+    } finally {
+      setActingRequestId(null);
+    }
+  };
+
+  const handleRetakeForm = async () => {
+    if (!activeForm) return;
+    try {
+      await mentorFormApi.deactivate(activeForm.id);
+      showToast("Form withdrawn. You can roll out a new one.", "success");
+      invalidateCache(CACHE_KEYS.ADMIN_DASHBOARD);
+      await loadData(true);
+    } catch (error: any) {
+      showToast(error.message || "Failed to withdraw form", "error");
+      throw error;
+    }
+  };
+
+  const handleDeleteForm = async () => {
+    if (!activeForm) return;
+    try {
+      await mentorFormApi.delete(activeForm.id);
+      showToast("Form and all its submissions deleted", "success");
+      invalidateCache(CACHE_KEYS.ADMIN_DASHBOARD);
+      await loadData(true);
+    } catch (error: any) {
+      showToast(error.message || "Failed to delete form", "error");
+      throw error;
+    }
+  };
+
+  const REVIEW_NAMES: Record<ReviewType, string> = {
+    review_1: "Review 1",
+    review_2: "Review 2",
+    final_review: "Final Review",
+  };
+
+  // Throws on failure so the confirm dialog stays open; it closes on success.
+  const handleUnpublishReview = async () => {
+    if (!reviewToUnpublish) return;
+    try {
+      await reviewsApi.removeRollout(reviewToUnpublish);
+      showToast(`${REVIEW_NAMES[reviewToUnpublish]} unpublished`, "success");
+      invalidateCache(CACHE_KEYS.ADMIN_DASHBOARD);
+      await loadData(true);
+    } catch (error: any) {
+      showToast(error.message || "Failed to unpublish review", "error");
+      throw error;
     }
   };
 
@@ -584,7 +764,7 @@ export default function AdminDashboard() {
         ) : (
           /* Tabs for Overview vs Management */
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="w-full grid grid-cols-4">
+            <TabsList className="w-full grid grid-cols-5">
               <TabsTrigger value="overview">
                 Mentor & Group Overview
               </TabsTrigger>
@@ -593,6 +773,7 @@ export default function AdminDashboard() {
               </TabsTrigger>
               <TabsTrigger value="evaluations">Review Evaluations</TabsTrigger>
               <TabsTrigger value="domains">Domains</TabsTrigger>
+              <TabsTrigger value="faculty">Faculty</TabsTrigger>
             </TabsList>
 
             {/* Overview Tab */}
@@ -602,6 +783,9 @@ export default function AdminDashboard() {
                 loading={overviewLoading}
                 semesterFilter={semesterFilter}
                 onSemesterFilterChange={setSemesterFilter}
+                onOpenTeam={(groupDbId) =>
+                  router.push(`/dashboard/faculty/team/${groupDbId}?tab=topic`)
+                }
               />
             </TabsContent>
 
@@ -679,6 +863,26 @@ export default function AdminDashboard() {
                         Mentor allocation form is currently active for{" "}
                         {profile?.department}.
                       </p>
+                      <div className="mt-4 flex flex-wrap gap-2 border-t border-green-200 pt-3">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setShowRetakeForm(true)}
+                          className="gap-1 bg-white"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          Retake Form
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => setShowDeleteForm(true)}
+                          className="gap-1"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Delete Form
+                        </Button>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-4">
@@ -739,6 +943,76 @@ export default function AdminDashboard() {
                 </CardContent>
               </Card>
 
+              {/* Pending Mentor Requests Card */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <UserCheck className="h-5 w-5" />
+                    Pending Mentor Requests
+                    {!!pendingRequests?.length && (
+                      <Badge variant="warning">{pendingRequests.length}</Badge>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <p className="text-sm text-gray-600">
+                    Team requests still waiting for a mentor to decide. You can
+                    accept or reject them on the mentor&apos;s behalf. A mentor
+                    can take at most 3 teams.
+                  </p>
+                  {pendingRequests === null ? (
+                    <RowsSkeleton rows={2} />
+                  ) : pendingRequests.length === 0 ? (
+                    <div className="py-4 text-center text-sm text-gray-500">
+                      No pending requests.
+                    </div>
+                  ) : (
+                    pendingRequests.map((request) => (
+                      <div
+                        key={request.id}
+                        className="flex flex-col gap-3 rounded-lg border border-gray-200 p-3 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-medium text-gray-900">
+                            {request.group.groupId}{" "}
+                            <span className="text-sm font-normal text-gray-500">
+                              → {request.mentor.name}
+                            </span>
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            Leader {request.group.leaderName} ·{" "}
+                            {request.group.memberCount} member
+                            {request.group.memberCount === 1 ? "" : "s"} ·
+                            preference #{request.preferenceRank}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 gap-2">
+                          <Button
+                            size="sm"
+                            disabled={actingRequestId === request.id}
+                            onClick={() =>
+                              handleRequestDecision(request, "accept")
+                            }
+                          >
+                            Accept
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={actingRequestId === request.id}
+                            onClick={() =>
+                              handleRequestDecision(request, "reject")
+                            }
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+
               {/* Review Rollout Card */}
               <Card>
                 <CardHeader>
@@ -784,11 +1058,23 @@ export default function AdminDashboard() {
                         </Button>
                       )}
                       {isReviewRolledOut("review_1") && (
+                        <>
                         <p className="text-xs text-green-700">
                           {groups.filter((g) => g.review1Status).length}/
                           {groups.filter((g) => g.mentorAssigned).length} teams
                           submitted
                         </p>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setReviewToUnpublish("review_1")}
+                          disabled={loading}
+                          className="mt-3 w-full gap-1 bg-white"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          Unpublish
+                        </Button>
+                        </>
                       )}
                     </div>
 
@@ -822,11 +1108,23 @@ export default function AdminDashboard() {
                         </Button>
                       )}
                       {isReviewRolledOut("review_2") && (
+                        <>
                         <p className="text-xs text-green-700">
                           {groups.filter((g) => g.review2Status).length}/
                           {groups.filter((g) => g.mentorAssigned).length} teams
                           submitted
                         </p>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setReviewToUnpublish("review_2")}
+                          disabled={loading}
+                          className="mt-3 w-full gap-1 bg-white"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          Unpublish
+                        </Button>
+                        </>
                       )}
                     </div>
 
@@ -860,11 +1158,23 @@ export default function AdminDashboard() {
                         </Button>
                       )}
                       {isReviewRolledOut("final_review") && (
+                        <>
                         <p className="text-xs text-green-700">
                           {groups.filter((g) => g.finalReviewStatus).length}/
                           {groups.filter((g) => g.mentorAssigned).length} teams
                           submitted
                         </p>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setReviewToUnpublish("final_review")}
+                          disabled={loading}
+                          className="mt-3 w-full gap-1 bg-white"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          Unpublish
+                        </Button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -874,168 +1184,150 @@ export default function AdminDashboard() {
 
             {/* Evaluations Tab */}
             <TabsContent value="evaluations" className="space-y-6">
+              <EvaluationsPanel
+                evaluations={evaluations}
+                loading={evaluationsLoading}
+              />
+            </TabsContent>
+
+            {/* Faculty Tab */}
+            <TabsContent value="faculty" className="space-y-6">
               <Card>
                 <CardHeader>
-                  <CardTitle>Review Evaluations</CardTitle>
+                  <CardTitle className="flex items-center gap-2">
+                    <UserPlus className="h-5 w-5" />
+                    Faculty Accounts
+                  </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  {evaluationsLoading ? (
-                    <div className="text-center py-8">
-                      Loading evaluations...
-                    </div>
-                  ) : evaluations.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">
-                      No evaluations submitted yet
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {evaluations.map((evaluation: any) => {
-                        const studentGrades = Array.isArray(
-                          evaluation.studentGrades,
-                        )
-                          ? evaluation.studentGrades
-                          : [];
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-gray-600">
+                    Faculty can&apos;t sign up on their own. Create their login
+                    here with an email and an initial password, then share
+                    those details with them. They can change the password
+                    after logging in.
+                  </p>
 
-                        return (
-                          <div
-                            key={evaluation.id}
-                            className="border rounded-lg p-4"
-                          >
-                            <div className="mb-3">
-                              <h4 className="font-semibold">
-                                {evaluation.group?.groupId || "Group"}
-                              </h4>
-                              <p className="text-sm text-gray-600">
-                                Evaluator:{" "}
-                                {evaluation.mentor?.name || "Unknown"}
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <Input
+                      value={newFaculty.name}
+                      onChange={(e) =>
+                        setNewFaculty({ ...newFaculty, name: e.target.value })
+                      }
+                      placeholder="Full name"
+                    />
+                    <Input
+                      type="email"
+                      value={newFaculty.email}
+                      onChange={(e) =>
+                        setNewFaculty({ ...newFaculty, email: e.target.value })
+                      }
+                      placeholder="Email, e.g. name@vit.edu.in"
+                      autoComplete="off"
+                    />
+                    <Input
+                      value={newFaculty.password}
+                      onChange={(e) =>
+                        setNewFaculty({
+                          ...newFaculty,
+                          password: e.target.value,
+                        })
+                      }
+                      placeholder="Initial password (min 6 characters)"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">
+                      Domains{" "}
+                      <span className="text-gray-500">(optional)</span>
+                    </label>
+                    <div className="mt-2">
+                      <DomainChips
+                        domains={domains.filter((d) => d.isActive)}
+                        selectedIds={newFaculty.domainIds}
+                        onChange={(ids) =>
+                          setNewFaculty({ ...newFaculty, domainIds: ids })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    onClick={handleAddFaculty}
+                    disabled={
+                      addingFaculty ||
+                      !newFaculty.name.trim() ||
+                      !newFaculty.email.trim() ||
+                      newFaculty.password.length < 6
+                    }
+                    className="gap-1"
+                  >
+                    <Plus className="h-4 w-4" />
+                    {addingFaculty ? "Creating..." : "Create Faculty Account"}
+                  </Button>
+
+                  <div className="space-y-2 pt-2">
+                    {facultyList.length === 0 ? (
+                      <div className="text-center py-6 text-gray-500">
+                        No faculty in this department yet.
+                      </div>
+                    ) : (
+                      facultyList.map((f) => (
+                        <div
+                          key={f.id}
+                          className="rounded-lg border border-gray-200 p-3"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="font-medium text-gray-900">
+                                {f.name}
                               </p>
-                              <p className="text-sm text-gray-600">
-                                Review:{" "}
-                                {evaluation.reviewType
-                                  ?.replace("_", " ")
-                                  .toUpperCase() || "Unknown"}
+                              <p className="text-sm text-gray-500">
+                                {f.email}
                               </p>
-                              <p className="text-sm text-gray-600">
-                                Division: {evaluation.division || "-"}
-                              </p>
-                              <p className="text-sm text-gray-600">
-                                Project Guide: {evaluation.projectGuide || "-"}
-                              </p>
-                              <p className="text-sm text-gray-600">
-                                Project Title: {evaluation.projectTitle || "-"}
-                              </p>
-                              {evaluation.reviewType === "review_1" ? (
-                                <>
-                                  <p className="text-sm text-gray-600">
-                                    Category of Project:{" "}
-                                    {evaluation.projectCategory || "-"}
-                                  </p>
-                                  <p className="text-sm text-gray-600">
-                                    Project Type:{" "}
-                                    {evaluation.projectType || "-"}
-                                  </p>
-                                </>
-                              ) : (
-                                <>
-                                  <p className="text-sm text-gray-600">
-                                    Domain of Project:{" "}
-                                    {evaluation.projectDomain || "-"}
-                                  </p>
-                                  <p className="text-sm text-gray-600">
-                                    Quality Grade:{" "}
-                                    {evaluation.qualityGrade || "-"}
-                                  </p>
-                                  <p className="text-sm text-gray-600">
-                                    Nature of Project:{" "}
-                                    {evaluation.projectNature || "-"}
-                                  </p>
-                                </>
-                              )}
-                              <p className="text-sm text-gray-600">
-                                Completion Percentage:{" "}
-                                {evaluation.completionPercentage ?? 0}%
+                              <p className="mt-1 text-xs text-gray-500">
+                                Domains: {f.domains || "none set"}
                               </p>
                             </div>
-                            {evaluation.remarks && (
-                              <p className="text-sm mt-2 text-gray-700">
-                                Remarks: {evaluation.remarks}
-                              </p>
+                            {editingFacultyId !== f.id && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleStartEditFacultyDomains(f)}
+                              >
+                                <Pencil className="h-4 w-4 mr-1" />
+                                Edit domains
+                              </Button>
                             )}
-                            {evaluation.paperPublicationStatus && (
-                              <p className="text-sm text-gray-600">
-                                Paper Status:{" "}
-                                {evaluation.paperPublicationStatus}
-                              </p>
-                            )}
-                            <div className="mt-3">
-                              <p className="text-xs font-semibold mb-1">
-                                Per-Student Criteria Breakdown:
-                              </p>
-                              <div className="space-y-2">
-                                {studentGrades.map((grade: any) => (
-                                  <div
-                                    key={grade.id}
-                                    className="text-xs bg-gray-50 p-2 rounded"
-                                  >
-                                    <p className="font-medium mb-1">
-                                      {grade.student?.name || "Unknown Student"}
-                                    </p>
-                                    {evaluation.reviewType === "review_1" ? (
-                                      <>
-                                        <p>
-                                          Progress (10):{" "}
-                                          {grade.progressMarks ?? 0}
-                                        </p>
-                                        <p>
-                                          Contribution (10):{" "}
-                                          {grade.contributionMarks ?? 0}
-                                        </p>
-                                        <p>
-                                          Publication (5):{" "}
-                                          {grade.publicationMarks ?? 0}
-                                        </p>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <p>
-                                          Tech Usage (5):{" "}
-                                          {grade.techUsageMarks ?? 0}
-                                        </p>
-                                        <p>
-                                          Innovativeness (5):{" "}
-                                          {grade.innovationMarks ?? 0}
-                                        </p>
-                                        <p>
-                                          Presentation (5):{" "}
-                                          {grade.presentationMarks ?? 0}
-                                        </p>
-                                        <p>
-                                          Project Activity (5):{" "}
-                                          {grade.activityMarks ?? 0}
-                                        </p>
-                                        <p>
-                                          Synopsis (5):{" "}
-                                          {grade.synopsisMarks ?? 0}
-                                        </p>
-                                      </>
-                                    )}
-                                  </div>
-                                ))}
+                          </div>
+                          {editingFacultyId === f.id && (
+                            <div className="mt-3 space-y-3 border-t pt-3">
+                              <DomainChips
+                                domains={domains.filter((d) => d.isActive)}
+                                selectedIds={editingFacultyDomainIds}
+                                onChange={setEditingFacultyDomainIds}
+                              />
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  onClick={handleSaveFacultyDomains}
+                                  disabled={savingFacultyDomains}
+                                >
+                                  {savingFacultyDomains ? "Saving..." : "Save"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setEditingFacultyId(null)}
+                                >
+                                  Cancel
+                                </Button>
                               </div>
                             </div>
-                            <p className="text-xs text-gray-500 mt-2">
-                              Submitted:{" "}
-                              {evaluation.filledAt
-                                ? new Date(
-                                    evaluation.filledAt,
-                                  ).toLocaleDateString()
-                                : "-"}
-                            </p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -1076,7 +1368,7 @@ export default function AdminDashboard() {
                   </div>
 
                   {domainsLoading ? (
-                    <div className="text-center py-8">Loading domains...</div>
+                    <RowsSkeleton rows={4} />
                   ) : domains.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">
                       No domains added yet.
@@ -1168,6 +1460,31 @@ export default function AdminDashboard() {
             </TabsContent>
           </Tabs>
         )}
+
+        {activeForm?.isActive && (
+          <>
+            <RetakeFormDialog
+              open={showRetakeForm}
+              department={profile?.department}
+              onOpenChange={setShowRetakeForm}
+              onConfirm={handleRetakeForm}
+            />
+            <DeleteFormDialog
+              open={showDeleteForm}
+              formId={activeForm.id}
+              department={profile?.department}
+              onOpenChange={setShowDeleteForm}
+              onConfirm={handleDeleteForm}
+            />
+          </>
+        )}
+
+        <UnpublishReviewDialog
+          open={reviewToUnpublish !== null}
+          reviewName={reviewToUnpublish ? REVIEW_NAMES[reviewToUnpublish] : ""}
+          onOpenChange={(open) => !open && setReviewToUnpublish(null)}
+          onConfirm={handleUnpublishReview}
+        />
 
         {/* Manual Allocation Modal */}
         <ManualAllocationModal

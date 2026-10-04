@@ -2,6 +2,8 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
+  Param,
   Body,
   UseGuards,
   Request,
@@ -9,6 +11,7 @@ import {
 import { Request as ExpressRequest } from 'express';
 import { IsString, IsNotEmpty } from 'class-validator';
 import { AdminService } from './admin.service';
+import { CreateFacultyDto, UpdateFacultyDomainsDto } from './dto/create-faculty.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 class AllocateMentorDto {
@@ -25,6 +28,25 @@ class AllocateMentorDto {
 @UseGuards(JwtAuthGuard)
 export class AdminController {
   constructor(private adminService: AdminService) {}
+
+  @Post('faculty')
+  async createFaculty(@Request() req: ExpressRequest, @Body() dto: CreateFacultyDto) {
+    return this.adminService.createFaculty(req.user.userId, dto);
+  }
+
+  @Patch('faculty/:id/domains')
+  async updateFacultyDomains(
+    @Request() req: ExpressRequest,
+    @Param('id') id: string,
+    @Body() dto: UpdateFacultyDomainsDto,
+  ) {
+    return this.adminService.updateFacultyDomains(req.user.userId, id, dto);
+  }
+
+  @Get('mentor-requests')
+  async getPendingMentorRequests(@Request() req: ExpressRequest) {
+    return this.adminService.getPendingMentorRequests(req.user.userId);
+  }
 
   @Get('mentor-overview')
   async getMentorOverview(@Request() req: ExpressRequest) {

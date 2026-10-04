@@ -112,7 +112,7 @@ function DialogContent({ children, className = "" }: DialogContentProps) {
           className={
             isFullscreen
               ? `relative h-screen w-screen bg-white overflow-y-auto ${className}`
-              : `relative bg-white rounded-lg shadow-lg border border-gray-200 max-h-[85vh] overflow-auto p-6 ${className}`
+              : `relative mx-auto bg-white rounded-lg shadow-lg border border-gray-200 max-h-[85vh] overflow-auto p-6 ${className}`
           }
         >
           {/* Close button */}

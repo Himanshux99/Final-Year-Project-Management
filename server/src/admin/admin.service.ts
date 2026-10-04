@@ -1,12 +1,15 @@
 import {
   Injectable,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProfilesService } from '../profiles/profiles.service';
 import { Department } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
+import { CreateFacultyDto, UpdateFacultyDomainsDto } from './dto/create-faculty.dto';
 
 export interface MentorWithGroups {
   id: string;
@@ -49,6 +52,107 @@ export class AdminService {
       throw new ForbiddenException('Only super admins can access this resource');
     }
     return profile;
+  }
+
+  // Resolves domain ids from the managed Domain list to the comma-separated
+  // names stored on Profile.domains. Only active domains may be assigned.
+  private async domainNamesFromIds(domainIds: string[] | undefined): Promise<string | null> {
+    const unique = Array.from(new Set(domainIds ?? []));
+    if (unique.length === 0) return null;
+
+    const found = await this.prisma.domain.findMany({
+      where: { id: { in: unique }, isActive: true },
+      orderBy: { name: 'asc' },
+    });
+    if (found.length !== unique.length) {
+      throw new BadRequestException('One or more selected domains are invalid');
+    }
+    return found.map((d) => d.name).join(', ');
+  }
+
+  async updateFacultyDomains(userId: string, facultyId: string, dto: UpdateFacultyDomainsDto) {
+    const admin = await this.verifyAdmin(userId);
+
+    const faculty = await this.prisma.profile.findUnique({ where: { id: facultyId } });
+    if (!faculty || faculty.role !== 'faculty' || faculty.department !== admin.department) {
+      throw new NotFoundException('Faculty not found');
+    }
+
+    return this.prisma.profile.update({
+      where: { id: facultyId },
+      data: { domains: await this.domainNamesFromIds(dto.domainIds) },
+    });
+  }
+
+  // Mentor requests still waiting on a mentor's decision, for every group in the
+  // admin's department. The admin can accept/reject these on the mentor's behalf.
+  async getPendingMentorRequests(userId: string) {
+    const admin = await this.verifyAdmin(userId);
+
+    const requests = await this.prisma.mentorAllocation.findMany({
+      where: {
+        status: 'pending',
+        group: { department: admin.department },
+      },
+      include: {
+        mentor: { select: { id: true, name: true, email: true, domains: true } },
+        group: {
+          select: {
+            id: true,
+            groupId: true,
+            teamCode: true,
+            creator: { select: { name: true } },
+            _count: { select: { members: true } },
+          },
+        },
+      },
+      orderBy: [{ createdAt: 'asc' }],
+    });
+
+    return requests.map((r) => ({
+      id: r.id,
+      preferenceRank: r.preferenceRank,
+      createdAt: r.createdAt,
+      mentor: r.mentor,
+      group: {
+        id: r.group.id,
+        groupId: r.group.groupId,
+        teamCode: r.group.teamCode,
+        leaderName: r.group.creator.name,
+        memberCount: r.group._count.members,
+      },
+    }));
+  }
+
+  // Faculty can't self-register: a super admin creates the login (email + initial
+  // password) and the faculty profile together, in the admin's own department.
+  async createFaculty(userId: string, dto: CreateFacultyDto) {
+    const admin = await this.verifyAdmin(userId);
+    const domains = await this.domainNamesFromIds(dto.domainIds);
+
+    const email = dto.email.trim();
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      throw new ConflictException('A user with this email already exists');
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: { email, password: hashedPassword },
+      });
+      return tx.profile.create({
+        data: {
+          userId: user.id,
+          name: dto.name.trim(),
+          email,
+          role: 'faculty',
+          department: admin.department,
+          domains,
+        },
+      });
+    });
   }
 
   async getMentorOverview(userId: string): Promise<MentorWithGroups[]> {
@@ -334,6 +438,26 @@ export class AdminService {
       },
     });
 
+    // Manual allocation needs a formId to satisfy the FK on MentorAllocation
+    // even when the department has no active form. Reuse (or create) a
+    // stable, inactive per-department placeholder form for that case rather
+    // than a dangling id, which used to violate the FK constraint and make
+    // every manual allocation fail when no form was active.
+    const formId =
+      activeForm?.id ??
+      (
+        await this.prisma.mentorAllocationForm.upsert({
+          where: { id: `manual-allocation-${admin.department}` },
+          update: {},
+          create: {
+            id: `manual-allocation-${admin.department}`,
+            department: admin.department,
+            isActive: false,
+            createdBy: admin.id,
+          },
+        })
+      ).id;
+
     // Use a transaction to:
     // 1. Reject all existing pending/waiting allocations for this group
     // 2. Create a new accepted allocation
@@ -347,12 +471,18 @@ export class AdminService {
         data: { status: 'rejected' },
       });
 
-      // Create new accepted allocation
-      await tx.mentorAllocation.create({
-        data: {
+      // Accept the allocation. The group may already have a row for this exact
+      // mentor + form (e.g. a preference that was just rejected above or earlier),
+      // and (groupId, mentorId, formId) is unique, so upsert instead of create.
+      await tx.mentorAllocation.upsert({
+        where: {
+          groupId_mentorId_formId: { groupId, mentorId, formId },
+        },
+        update: { status: 'accepted' },
+        create: {
           groupId: groupId,
           mentorId: mentorId,
-          formId: activeForm?.id || 'manual-allocation',
+          formId,
           status: 'accepted',
           preferenceRank: 0, // 0 indicates manual assignment
         },

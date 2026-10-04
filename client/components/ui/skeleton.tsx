@@ -193,3 +193,91 @@ export function TeamProgressSkeleton() {
     </div>
   );
 }
+
+// Full-page placeholder used while auth/redirect resolves: header bar + dashboard body.
+export function PageSkeleton() {
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="border-b border-gray-200 bg-white">
+        <div className="container mx-auto flex items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-10 w-10 rounded-xl" />
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-3 w-20" />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="hidden space-y-2 sm:block">
+              <Skeleton className="ml-auto h-4 w-28" />
+              <Skeleton className="ml-auto h-3 w-20" />
+            </div>
+            <Skeleton className="h-10 w-10 rounded-full" />
+            <Skeleton className="h-10 w-10 rounded-full" />
+          </div>
+        </div>
+      </div>
+      <div className="container mx-auto px-4 py-8">
+        <DashboardSkeleton />
+      </div>
+    </div>
+  );
+}
+
+// Matches the layout of the mentor overview stat tiles.
+export function StatTilesSkeleton({ count = 4 }: { count?: number }) {
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {Array.from({ length: count }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+        >
+          <Skeleton className="h-11 w-11 rounded-lg" />
+          <div className="space-y-2">
+            <Skeleton className="h-6 w-10" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Compact list rows for small panels (domains, attachments, etc.).
+export function RowsSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-center justify-between rounded-lg border border-gray-200 p-3"
+        >
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="h-5 w-16 rounded-full" />
+          </div>
+          <div className="flex gap-2">
+            <Skeleton className="h-8 w-8" />
+            <Skeleton className="h-8 w-20" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Form-shaped placeholder for evaluation dialogs.
+export function FormSkeleton({ fields = 5 }: { fields?: number }) {
+  return (
+    <div className="space-y-5 px-4 py-4 sm:px-6">
+      {Array.from({ length: fields }).map((_, i) => (
+        <div key={i} className="space-y-2">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-10 w-full" />
+        </div>
+      ))}
+      <Skeleton className="ml-auto h-10 w-32" />
+    </div>
+  );
+}
